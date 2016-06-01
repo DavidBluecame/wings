@@ -16,7 +16,8 @@
 -type e3d_point() :: {float(),float(),float()}.
 
 -type e3d_plane() :: {e3d_vector(), float()}.
-
+-type e3d_ray() :: {Origin::e3d_point(), Dir::e3d_vector(),
+		    Near::float(), Far::float()}.
 
 %% Compact 4x4 matrix representation.
 -type e3d_compact_matrix() ::
@@ -82,4 +83,6 @@
 	 dir					%Directory for file.
 	}).
 
-
+-record(ray,
+	{o,d, 					% Origin, Direction vector
+	 n, f}).				% Near far (or MinT MaxT)
