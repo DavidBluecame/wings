@@ -47,12 +47,7 @@ start() ->
     RaysBin = ray_bin(Rays),
     CL = init_cl(),
 
-    Ts = [{"QBVH bin",
-	   fun() -> e3d_qbvh:init(Fs) end,
-	   fun(Data) -> erl_ray_trace(Rays, e3d_qbvh, Data, []) end},
-	  {"QBVH erl",
-	   fun() -> e3d_qbvh:init(Fs, [{no_binary, true}]) end,
-	   fun(Data) -> erl_ray_trace(Rays, e3d_qbvh, Data, []) end},
+    Ts = [
 	  {"BVH  bin",
 	   fun() -> e3d_bvh:init(Fs, [{binary, true}]) end,
 	   fun(Data) -> erl_ray_trace(Rays, e3d_bvh, Data, []) end},
@@ -62,9 +57,6 @@ start() ->
 	  {"BVH cerl",
 	   fun() -> e3d_bvh:init(Fs, [{no_binary, true}, {compile,true}]) end,
 	   fun(Data) -> erl_ray_trace(Rays, e3d_bvh, e3d_bvh:init(Data), []) end},
-	  {"QBVH OCL",
-	   fun() -> e3d_qbvh:init(Fs) end,
-	   fun(Data) -> Bin = run_cl(CL, qbvh, RaysBin, Data), check_rays_qbvh(Bin, []) end},
 	  {"BVH  OCL",
 	   fun() -> e3d_bvh:init(Fs, [{binary, true}]) end,
 	   fun(Data) -> Bin = run_cl(CL, bvh, RaysBin, Data), check_rays_bvh(Bin, []) end}
@@ -113,17 +105,6 @@ erl_ray_trace([Ray|Rays], Mod, Qbvh, Acc) ->
 erl_ray_trace([], _, _, Acc) ->
     Acc.
 
-check_rays_qbvh(<<_:12/binary, 16#FFFFFFFF:32, Rest/binary>>, Acc) ->
-    check_rays_qbvh(Rest, Acc);
-check_rays_qbvh(<<T:?F32,B1:?F32,B2:?F32,Face:?I32, Rest/binary>>, Acc) ->
-    %% io:format("E ~s => ~s ~s ~s ~s~n",[f(Dir), f(T),f(B1),f(B2),f(Face)]),
-    %% FVs = [V1,V2,V3] = array:get(Face, Fs),
-    %% io:format("   ~p => [~s,~s,~s]~n",
-    %% 	      [FVs, f(element(V1+1,Vs)),f(element(V2+1,Vs)),f(element(V3+1,Vs))]),
-    check_rays_qbvh(Rest, [#hit{t=T,b1=B1,b2=B2,f=Face}|Acc]);
-check_rays_qbvh(<<>>, Acc) ->
-    Acc.
-
 check_rays_bvh(<<_:16/binary, 16#FFFFFFFF:32, Rest/binary>>, Acc) ->
     check_rays_bvh(Rest, Acc);
 check_rays_bvh(<<T:?F32,B1:?F32,B2:?F32,MeshId:?I32, Face:?I32, Rest/binary>>, Acc) ->
@@ -164,7 +145,7 @@ make_rays() ->
     N0 = 16384, % 1 Mega rays
     %% N0 = 1,
     N = 64*N0-1,
-    [e3d_qbvh:ray(Origo,calc_dir(Dir/N)) || Dir <- lists:seq(0, N)].
+    [e3d_bvh:ray(Origo,calc_dir(Dir/N)) || Dir <- lists:seq(0, N)].
 
 %% calc_dir(Dir) ->
 %%     e3d_vec:norm(e3d_q:vec_rotate({1.0,0.0,-1.0}, e3d_q:from_angle_axis(Dir*90, {0.0,1.0,0.0}))).
@@ -250,14 +231,11 @@ init_cl() ->
 	_MaxWorkGroupSize = proplists:get_value(max_work_group_size, DeviceInfo, 4),
 
 	%% io:format("DeviceInfo: ~p\n", [DeviceInfo])
-	%%Kernel = compile(CL, "test_kernel.cl"),
-	Qbvh = compile(CL, "qbvh_kernel.cl"),
 	Bvh  = compile(CL, "bvh_kernel.cl"),
 	{ok,Queue} = cl:create_queue(CL#cl.context,Device,[]),
-	{ok,_Local} = cl:get_kernel_workgroup_info(Qbvh, Device, work_group_size),
 	%%io:format("work_group_size = ~p ~p\n", [_Local, _MaxWorkGroupSize]),
 
-	#{cl=>CL, qbvh=>Qbvh, bvh=>Bvh, q=>Queue, wgsz=>64}
+	#{cl=>CL, bvh=>Bvh, q=>Queue, wgsz=>64}
     catch
 	_Error:Reason ->
 	    io:format("Error ~p ~p~n", [Reason, erlang:get_stacktrace()]),
@@ -318,25 +296,3 @@ bin_ray(#ray{o={OX,OY,OZ}, d={DX,DY,DZ}, n=MinT, f=MaxT}) ->
 
 rayhit_size(qbvh) -> ?RAYHIT_SZ;
 rayhit_size(bvh) -> 20.
-
-%% max_float() ->
-%%     max_float(3.000000e+38, 1.0e+37, 50000).
-
-%% max_float(X, Next, N) when N > 0, Next > 1.0 ->
-%%     Bin = <<X:?F32>>,
-%%     Op = try
-%% 	     <<Y:?F32>> = Bin,
-%% 	     erlang:display({Y, Next}),
-%% 	     inc
-%% 	 catch error:_ ->
-%% 		 erlang:display({fail,X,Next}),
-%% 		 dec
-%% 	 end,
-%%     if
-%% 	Op == inc ->
-%% 	    max_float(X+Next, Next*1.2, N);
-%% 	Op == dec ->
-%% 	    max_float(X-Next, Next / 2, N-1)
-%%     end;
-%% max_float(X,_,_) ->
-%%     X.

@@ -8,9 +8,10 @@
 %%% Created : 29 Apr 2016 by Dan Gudmundsson <dgud@erlang.org>
 %%%-------------------------------------------------------------------
 -module(e3d_bvh).
--export([init/1, init/2, ray_trace/2, intersect/2, hit_triangle/4, tri_intersect/4]).
-
--import(int_test, [f/1]).
+-export([init/1, init/2,
+	 ray/2, ray/4, ray_trace/2,
+	 intersect/2,
+	 hit_triangle/4, tri_intersect/4]).
 
 -include("e3d.hrl").
 
@@ -54,9 +55,20 @@ init(FaceData, Opts)  ->
 	    DeepVs0 = [GetVs(verts) || {_, GetVs} <- FaceData],
 	    {VsBin,VsOffsets} = build_bin(DeepVs0, <<>>, [0]),
 	    {_,A} = build_array(Root, 0, array:new(), VsOffsets),
-	    io:format("Size ~p~n", [array:size(A)]),
+	    %% io:format("Size ~p~n", [array:size(A)]),
 	    #{vs=>VsBin, ns=>list_to_binary(array:to_list(A))}
     end.
+
+%%--------------------------------------------------------------------
+%% @doc Creates a ray
+%% @end
+%%--------------------------------------------------------------------
+
+ray(Orig, Vector) ->
+    ray(Orig, Vector, ?EPSILON*10, ?E3D_INFINITY).
+ray(Orig, Vector, MinT, MaxT) ->
+    #ray{o=Orig, d=Vector, n=MinT, f=MaxT}.
+
 
 ray_trace(Ray = #ray{d=Dir}, #{ns:=#{}=Root, vs:=Vs}) ->
     Swap  = e3d_bv:inv_sign(Dir),
@@ -299,14 +311,14 @@ intersect_2(#{mesh:=Mesh1, index:=I1, vs:=F1},
 	    Vs1, Vs2, Acc) ->
     T1 = get_tri(Mesh1, F1, Vs1),
     T2 = get_tri(Mesh2, F2, Vs2),
-    io:format("~p ~p:~p:~p~n~p ~p:~p:~p",
-	      [Mesh1, I1  div 2, I1, T1, Mesh2, I2 div 2, I2, T2]),
+    %% io:format("~p ~p:~p:~p~n~p ~p:~p:~p",
+    %% 	      [Mesh1, I1  div 2, I1, T1, Mesh2, I2 div 2, I2, T2]),
     case tri_intersect(T1, T2, {Mesh1,I1}, {Mesh2,I2}) of
 	false ->
-	    io:format(" => Miss~n~n"),
+	    %% io:format(" => Miss~n~n"),
 	    Acc;
 	Intersect  ->
-	    io:format(" => Hit~n~n"),
+	    %% io:format(" => Hit~n~n"),
 	    [Intersect|Acc]
     end.
 
@@ -358,8 +370,8 @@ tri_intersect({V0,V1,V2}, {U0,U1,U2}, F1, F2) ->
 			    coplanar;
 			{ISect1,A1,A2} ->
 			    {ISect2,B1,B2} = tri_intvals(U0,U1,U2, Index, Du0, Du1, Du2, Du0Du1, Du0Du2),
-			    io:format("~p  ~p~n",[sort2(ISect1),sort2(ISect2)]),
-			    io:format("A1:~s~nA2:~s~nB1:~s~nB2:~s~n", [f(A1),f(A2),f(B1),f(B2)]),
+			    %% io:format("~p  ~p~n",[sort2(ISect1),sort2(ISect2)]),
+			    %% io:format("A1:~s~nA2:~s~nB1:~s~nB2:~s~n", [f(A1),f(A2),f(B1),f(B2)]),
 			    pick_points(sort2(ISect1), sort2(ISect2), A1, A2, B1, B2, F1, F2)
 		    end
 	    end
