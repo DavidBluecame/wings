@@ -32,12 +32,7 @@
 	     [6,7,2,1]]).
 
 -define(RAYHIT_SZ, 16).
-
-%% -record(ray,
-%% 	{o,d, 					% Origin, Direction vector
-%% 	 n, f}).				% Near far (or MinT MaxT)
-
--record(hit, {t, b1, b2, f = 16#ffffffff}).
+%-record(hit, {t, b1, b2, f = 16#ffffffff}).
 
 go()  -> start().
 
@@ -85,7 +80,7 @@ test(Parent, String, T0, InitData, Test) ->
     io:format("~s: ~.5w ~.5w ~w~n", [String, T1 div 1000, T0 div 1000, length(Res)]),
     Parent ! {result, Res}.
 
-debug(I, [{_, #hit{f=F1,b2=S1}}|H1], [{_, #hit{f=F2,b2=S2}}|H2]) ->
+debug(I, [{_, #{f:=F1,b2:=S1}}|H1], [{_, #{f:=F2,b2:=S2}}|H2]) ->
     io:format("~.2w: ~p (~p) ~p(~p)~n",[I, F1,S1,F2,S2]),
     debug(I+1, H1,H2);
 debug(_, [], []) ->
@@ -93,14 +88,8 @@ debug(_, [], []) ->
 
 erl_ray_trace([Ray|Rays], Mod, Qbvh, Acc) ->
     case Mod:ray_trace(Ray,Qbvh) of
-	#hit{f=16#ffffffff} ->
-	    %% io:format("E miss~n",[]),
-	    erl_ray_trace(Rays, Mod, Qbvh, Acc);
-	%% #hit{t=T, b1=B1, b2=B2, f=Face} ->
-	    %% io:format("~p: E ~s => ~s ~s ~s ~s~n",
-	    %% 	      [N, f(Ray#ray.d), f(T),f(B1),f(B2),f(Face)])
-	Hit ->
-	    erl_ray_trace(Rays, Mod, Qbvh, [Hit|Acc])
+	false -> erl_ray_trace(Rays, Mod, Qbvh, Acc);
+	Hit ->   erl_ray_trace(Rays, Mod, Qbvh, [Hit|Acc])
     end;
 erl_ray_trace([], _, _, Acc) ->
     Acc.
@@ -108,12 +97,12 @@ erl_ray_trace([], _, _, Acc) ->
 check_rays_bvh(<<_:16/binary, 16#FFFFFFFF:32, Rest/binary>>, Acc) ->
     check_rays_bvh(Rest, Acc);
 check_rays_bvh(<<T:?F32,B1:?F32,B2:?F32,MeshId:?I32, Face:?I32, Rest/binary>>, Acc) ->
-    check_rays_bvh(Rest, [#hit{t=T,b1=B1,b2=B2,f={MeshId, Face}}|Acc]);
+    check_rays_bvh(Rest, [#{t=>T,b1=>B1,b2=>B2,mesh=>MeshId,face=>Face}|Acc]);
 check_rays_bvh(<<>>, Acc) ->
     Acc.
 
-verify([#hit{f=F0,t=T0,b1=B10,b2=B20}=H0|VL],
-       [#hit{f=F1,t=T1,b1=B11,b2=B21}=H1|HL], Res)->
+verify([#{face:=F0,t:=T0,b1:=B10,b2:=B20}=H0|VL],
+       [#{face:=F1,t:=T1,b1:=B11,b2:=B21}=H1|HL], Res)->
     T  = abs(r(T0)  - r(T1)) < 2,
     B1 = abs(r(B10) - r(B11)) < 2,
     B2 = abs(r(B20) - r(B21)) < 2,

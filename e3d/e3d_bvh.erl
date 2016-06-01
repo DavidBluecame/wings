@@ -11,9 +11,40 @@
 -export([init/1, init/2,
 	 ray/2, ray/4, ray_trace/2,
 	 intersect/2,
-	 hit_triangle/4, tri_intersect/4]).
+	 hit_triangle/5, tri_intersect/4]).
 
 -include("e3d.hrl").
+
+-type hit() ::
+	#{t  => float(),
+	  b1 => float(),
+	  b2 => float(),
+	  mesh => integer(),
+	  face => integer()}.
+
+-type tri_intersect() ::  %% The (new) edge that intersects the two triangle
+	#{p1    => e3d_point(),  %% Edge point 1
+	  p2    => e3d_point(),  %% Edge point 2
+	  mf1   => {Mesh::integer(),Face::integer()},  %% Mesh and Face of P1
+	  mf2   => {Mesh::integer(),Face::integer()},  %% Mesh and Face of P2
+	  other => {Mesh::integer(),Face::integer()}}. %% Intersecting Mesh and Face
+
+-type e3d_bvh() :: #{vs => #{integer()=>array:array()} | binary(),
+		     ns => tree() | binary()}.
+
+-type e3d_compiled() :: {bvh, compiled, atom()}.
+
+-type leaf() :: #{bb    => e3d_bbox(),
+		  c2    => e3d_point(),  %% CenterPos*2
+		  vs    => {integer(), integer(), integer()}, %% Vertex indices
+		  mesh  => integer(),
+		  index => integer()}.
+
+-type tree_node() :: #{bb    => e3d_bbox(),
+		       left  => tree_node() | leaf(),
+		       right => tree_node() | leaf()}.
+
+-type tree() :: leaf() | tree_node().
 
 -define(F32, 32/float-native).
 -define(I32, 32/signed-native).
@@ -24,15 +55,13 @@
 -define(GetSkipIndex(NodeData), ((NodeData) band 16#7fffffff)).
 -define(ENTRY_SZ, 8*4).
 
--record(hit, {t, b1, b2, f = 16#ffffffff}).
-%-record(node, {bb, c2, left, right, mesh, index}).
-
--spec init([{NoFs :: integer(), GetVs :: function()}]) -> term().
+-spec init([{NoFs :: integer(), GetVs :: function()}] | e3d_compiled()) -> e3d_bvh().
 init({bvh, compiled, Mod}) ->
     #{vs=>Mod:verts(), ns=>Mod:tree()};
 init(Data) ->
     init(Data, []).
 
+-spec init([{NoFs :: integer(), GetVs :: function()}], []) -> e3d_bvh() | e3d_compiled().
 init(FaceData, Opts)  ->
     TT  = proplists:get_value(treetype, Opts, 4),
     Eps = proplists:get_value(epsilon, Opts, ?EPSILON),
@@ -55,7 +84,6 @@ init(FaceData, Opts)  ->
 	    DeepVs0 = [GetVs(verts) || {_, GetVs} <- FaceData],
 	    {VsBin,VsOffsets} = build_bin(DeepVs0, <<>>, [0]),
 	    {_,A} = build_array(Root, 0, array:new(), VsOffsets),
-	    %% io:format("Size ~p~n", [array:size(A)]),
 	    #{vs=>VsBin, ns=>list_to_binary(array:to_list(A))}
     end.
 
@@ -63,22 +91,34 @@ init(FaceData, Opts)  ->
 %% @doc Creates a ray
 %% @end
 %%--------------------------------------------------------------------
-
+-spec ray(e3d_point(), e3d_vector()) -> e3d_ray().
 ray(Orig, Vector) ->
     ray(Orig, Vector, ?EPSILON*10, ?E3D_INFINITY).
+
+-spec ray(e3d_point(), e3d_vector(), float(), float()) -> e3d_ray().
 ray(Orig, Vector, MinT, MaxT) ->
     #ray{o=Orig, d=Vector, n=MinT, f=MaxT}.
 
-
+%%--------------------------------------------------------------------
+%% @doc Cast a ray on BVH
+%% @end
+%%--------------------------------------------------------------------
+-spec ray_trace(e3d_ray(), e3d_bvh()) -> false | hit().
 ray_trace(Ray = #ray{d=Dir}, #{ns:=#{}=Root, vs:=Vs}) ->
     Swap  = e3d_bv:inv_sign(Dir),
-    {_, Hit} = erl_ray_trace(Ray, #hit{}, Swap, Root, Vs),
+    {_, Hit} = erl_ray_trace(Ray, false, Swap, Root, Vs),
     Hit;
 ray_trace(Ray = #ray{d=Dir}, #{vs:=VsBin, ns:=Bin}) when is_binary(VsBin) ->
     Swap  = e3d_bv:inv_sign(Dir),
-    {_, Hit} = bin_ray_trace(0, Ray, #hit{}, Swap, Bin, VsBin, 1),
+    {_, Hit} = bin_ray_trace(0, Ray, false, Swap, Bin, VsBin, 1),
     Hit.
 
+%%--------------------------------------------------------------------
+%% @doc Intersect two BVH's and return new edges on intersecting
+%% triangles if any.
+%% @end
+%% --------------------------------------------------------------------
+-spec intersect(e3d_bvh(), e3d_bvh()) -> [tri_intersect()].
 intersect(#{ns:=N1, vs:=Vs1}, #{ns:=N2, vs:=Vs2}) ->
     intersect_1(N1, N2, Vs1, Vs2, []).
 
@@ -131,11 +171,10 @@ find_best_split(Nodes) ->
 	    fun(#{c2:={V,_,_}}) -> V < Mx end
     end.
 
-partition(_, [N1,N2]) -> {[N1],[N2]};
+partition(_, [N1,N2]) ->
+    {[N1],[N2]};
 partition(Split, Nodes) ->
-    {L1,L2} = lists:partition(Split, Nodes),
-    %io:format("Nodes ~p~n  ~p~n  ~p~n",[Nodes,L1,L2]),
-    {L1,L2}.
+    lists:partition(Split, Nodes).
 
 build_array(#{bb:=BB, left:=L, right:=R}, Offset0, Array0, VsOffsets) ->
     {Offset1, Array1} = build_array(L, Offset0+1,  Array0, VsOffsets),
@@ -168,7 +207,7 @@ erl_ray_trace(Ray0, Hit0, Swap, #{bb:=BB, left:=L, right:=R}, Vs) ->
 	    {Ray0, Hit0}
     end;
 erl_ray_trace(R, H, _Swap, #{mesh:=Mesh, index:=I, vs:=Face}, Vs) ->
-    hit_triangle(R, H, get_tri(Mesh, Face, Vs), {Mesh, I}).
+    hit_triangle(R, H, get_tri(Mesh, Face, Vs), Mesh, I).
 
 bin_ray_trace(Current, Ray0, Hit0, Swap, Bin, Vs, Level) ->
     Offset = (Current*?ENTRY_SZ),
@@ -179,10 +218,7 @@ bin_ray_trace(Current, Ray0, Hit0, Swap, Bin, Vs, Level) ->
 		    {Ray, Hit} = bin_tri_hit(Ray0, Hit0, Data, Vs),
 		    bin_ray_trace(Current+1, Ray, Hit, Swap, Bin, Vs, Level);
 		false ->
-		    %%io:format("Node ~p~n",[Current]),
 		    case bin_bb_intersect(Ray0, Swap, Data) of
-			%% true  when Max == Level -> {Ray0, Hit0#hit{f={500+Current, Current+1}}};
-			%% false when Max == Level -> {Ray0, Hit0#hit{f={1000+Current, NodeData}}};
 			true  -> bin_ray_trace(Current+1, Ray0, Hit0, Swap, Bin, Vs, Level+1);
 			false -> bin_ray_trace(NodeData, Ray0, Hit0, Swap, Bin, Vs, Level+1)
 		    end
@@ -197,7 +233,7 @@ bin_tri_hit(Ray, Hit, <<V1:?U32, V2:?U32, V3:?U32, MeshId:?U32, I:?U32, _:?U32>>
     V1p = {X1,Y1,Z1},
     V2p = {X2,Y2,Z2},
     V3p = {X3,Y3,Z3},
-    hit_triangle(Ray, Hit, {V1p, V2p, V3p}, {MeshId, I}).
+    hit_triangle(Ray, Hit, {V1p, V2p, V3p}, MeshId, I).
 
 bin_bb_intersect(Ray, Swap, <<MIx:?F32, MIy:?F32, MIz:?F32, MAx:?F32, MAy:?F32, MAz:?F32>>) ->
     e3d_bv:hit(Ray, Swap, {{MIx,MIy,MIz},{MAx,MAy,MAz}}).
@@ -205,7 +241,7 @@ bin_bb_intersect(Ray, Swap, <<MIx:?F32, MIy:?F32, MIz:?F32, MAx:?F32, MAy:?F32, 
 %% Woop JCGT 2(1)
 %% http://jcgt.org/published/0002/01/05/paper.pdf
 hit_triangle(#ray{o=Orig, d=Dir}=Ray, Hit0, % {_,_,Kz} = Order, {_,_,Sz} = Shear,
-	     {TA,TB,TC}, Face) ->
+	     {TA,TB,TC}, Mesh, Face) ->
     {_,_,Kz} = Order = order(Dir),
     {_,_,Sz} = Shear = shear(Dir,Order),
 
@@ -226,19 +262,23 @@ hit_triangle(#ray{o=Orig, d=Dir}=Ray, Hit0, % {_,_,Kz} = Order, {_,_,Sz} = Shear
 	    Bz = Sz*element(Kz, B),
 	    Cz = Sz*element(Kz, C),
 	    T = U*Az + V*Bz + W*Cz,
-	    if
+	    case Hit0 of
 		%% ifdef backface culling
-		(T < 0.0); T > (Hit0#hit.t*Det) -> {Ray, Hit0};
+		_ when T < 0.0 ->
+		    {Ray, Hit0};
+		#{t:=HitT} when T > (HitT*Det) ->
+		    {Ray, Hit0};
 		%% non backface culling
 		%% (Det > 0.0 andalso T < 0.0) orelse
 		%% (Det < 0.0 andalso T > 0.0) orelse
 		%% -1.0*T > -1.0*Hit0#hit.t*Det) -> Hit0;
-		true ->
+		_ ->
 		    RcpDet = 1.0 / Det,
-		    Hit = #hit{t=Far=T*RcpDet,
-			       b1=V*RcpDet,
-			       b2=W*RcpDet,
-			       f=Face},
+		    Hit = #{t=>Far=T*RcpDet,
+			    b1=>V*RcpDet,
+			    b2=>W*RcpDet,
+			    mesh=>Mesh,
+			    face=>Face},
 		    {Ray#ray{f=Far}, Hit}
 	    end
     end.
@@ -287,7 +327,6 @@ shear(Dir, {OX,OY,OZ}) ->
 shear_scale(Vec, {Sx,Sy,_Sz}, {OX,OY,OZ}) ->
     Az = element(OZ, Vec),
     {element(OX,Vec)-Sx*Az, element(OY,Vec)-Sy*Az}.
-
 
 %%-------------------------------------------------------
 
