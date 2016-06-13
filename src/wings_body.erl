@@ -222,7 +222,7 @@ command({vertex_attributes,remove_uv_coordinates}, St) ->
 command({vertex_attributes,remove_all_attributes}, St) ->
     {save_state,va_remove(all, St)};
 command({bool,add}, St) ->
-    ?SLOW(wings_bool:add(St));
+    ?SLOW({save_state, wings_bool:add(St)});
 command({weld,Ask}, St) ->
     ?SLOW(weld(Ask, St));
 command(vertex_color, St) ->
