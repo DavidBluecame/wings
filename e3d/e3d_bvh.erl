@@ -409,8 +409,8 @@ tri_intersect({V0,V1,V2}, {U0,U1,U2}, F1, F2) ->
 			    coplanar;
 			{ISect1,A1,A2} ->
 			    {ISect2,B1,B2} = tri_intvals(U0,U1,U2, Index, Du0, Du1, Du2, Du0Du1, Du0Du2),
-			    %% io:format("~p  ~p~n",[sort2(ISect1),sort2(ISect2)]),
-			    %% io:format("A1:~s~nA2:~s~nB1:~s~nB2:~s~n", [f(A1),f(A2),f(B1),f(B2)]),
+			    io:format("~p  ~p~n",[sort2(ISect1),sort2(ISect2)]),
+			    io:format("A1:~p~nA2:~p~nB1:~p~nB2:~p~n", [(A1),(A2),(B1),(B2)]),
 			    pick_points(sort2(ISect1), sort2(ISect2), A1, A2, B1, B2, F1, F2)
 		    end
 	    end
