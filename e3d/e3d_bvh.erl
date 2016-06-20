@@ -410,8 +410,10 @@ tri_intersect({V0,V1,V2}, {U0,U1,U2}, F1, F2) ->
 			{ISect1,A1,A2} ->
 			    {ISect2,B1,B2} = tri_intvals(U0,U1,U2, Index, Du0, Du1, Du2, Du0Du1, Du0Du2),
 			    io:format("~p  ~p~n",[sort2(ISect1),sort2(ISect2)]),
-			    io:format("A1:~p~nA2:~p~nB1:~p~nB2:~p~n", [(A1),(A2),(B1),(B2)]),
-			    pick_points(sort2(ISect1), sort2(ISect2), A1, A2, B1, B2, F1, F2)
+			    io:format("A1:~w~nA2:~w~nB1:~w~nB2:~w~n", [(A1),(A2),(B1),(B2)]),
+			    PP = pick_points(sort2(ISect1), sort2(ISect2), A1, A2, B1, B2, F1, F2),
+			    io:format("~p~n~n",[PP]),
+			    PP
 		    end
 	    end
     end.

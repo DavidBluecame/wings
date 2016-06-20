@@ -52,13 +52,18 @@ find_intersect(#{bvh:=B1}=Head, [#{bvh:=B2}=H1|Rest]) ->
 find_intersect(_Head, []) ->
     false.
 
-merge(EdgeInfo, #{id:=Id1,map:=M1,fs:=Fs1}=Head, #{id:=Id2,map:=M2,fs:=Fs2}) ->
-    io:format("~p:~p => ~p~n", [Id1, Id2, EdgeInfo]),
-    KD3 = make_kd3(EdgeInfo),
-    Loops = build_vtx_loops(KD3, []),
-    io:format("Loops: ~p ~n", [ [lists:sort([P1,P2]) || {_,#{p1:=P1,p2:=P2}} <- hd(Loops)] ]),
-    MFs = remap(EdgeInfo, Id1, M1, Id2, M2),
-    Head#{id:=Id1++Id2,fs:=Fs1++Fs2++MFs}.
+merge(EdgeInfo, #{id:=Id1,fs:=Fs1}=I1, #{id:=Id2,fs:=Fs2}=I2) ->
+    ReEI = [remap(Edge, I1, I2) || Edge <- EdgeInfo, min_length(Edge)],
+    KD3 = make_kd3(ReEI),
+    io:format("~p~n", [KD3]),
+    VLoops0 = build_vtx_loops(KD3, []),
+    io:format("~p~n", [[pick(E) || E <- hd(VLoops0)]]),
+    _VLoops1 = [loop_we(Loop, Id1) || Loop <- VLoops0],
+    _VLoops2 = [loop_we(Loop, Id2) || Loop <- VLoops0],
+    %% io:format("Loop ~p: ~p~n", [Id1, _VLoops1]),
+    %% io:format("Loop ~p: ~p~n", [Id2, _VLoops2]),
+    MFs = lists:flatten([[MF1,MF2] || #{mf1:=MF1,other:=MF2} <- ReEI]),
+    I1#{id:=min(Id1,Id2),fs:=Fs1++Fs2++MFs}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -70,7 +75,7 @@ make_bvh(_, #we{id=Id, fs=Fs0}=We0, Bvhs) ->
 	     (meshId) -> Id
 	  end,
     Bvh = e3d_bvh:init([{array:size(Ts), Get}]),
-    [#{id=>[Id],map=>Ts,bvh=>Bvh,fs=>[]}|Bvhs].
+    [#{id=>Id,map=>Ts,bvh=>Bvh,fs=>[], we=>We0}|Bvhs].
 
 make_kd3(Edges) ->
     Ps = lists:foldl(fun(#{p1:=P1,p2:=P2}=EI, Acc) ->
@@ -78,28 +83,63 @@ make_kd3(Edges) ->
 		     end, [], Edges),
     e3d_kd3:from_list(Ps).
 
+min_length(#{p1:=P1,p2:=P2}=Edge) ->
+    Dist2 = e3d_vec:dist_sqr(P1,P2),
+    %% io:format("~p ~p~n", [Edge, Dist2]),
+    Dist2 > 1.0e-15.
+
+loop_we(Loop, Id) ->
+    [loop_we_1(EdgeI, Id) || EdgeI <- Loop].
+
+loop_we_1({Point, #{mf1:=MF1, other:={_, F2}}}, Id) ->
+    case MF1 of
+	{Id, Face} -> {Face, Point};
+	_ -> {F2, Point}
+    end.
+
 build_vtx_loops(KD30, Acc) ->
-    case e3d_kd3:take_nearest({0,0,0}, KD30) of
+    case e3d_kd3:take_nearest({1.0e23,1.0e23,1.0e23}, KD30) of
 	undefined -> Acc;
 	{{_,Edge}=First, KD31} ->
-	    {P1,P2} = pick(First),
-	    KD32 = e3d_kd3:delete_object({P2,Edge}, KD31),
+	    {P1,{Pos,_}=P2} = pick(First),
+	    KD32 = e3d_kd3:delete_object({Pos,Edge}, KD31),
 	    {Loop, KD33} = build_vtx_loop(P2, P1, KD32, [First]),
 	    build_vtx_loops(KD33, [Loop|Acc])
     end.
 
-build_vtx_loop(Search, Start, KD30, Acc) ->
-    case e3d_kd3:take_nearest(Search, KD30) of
+build_vtx_loop({Pos,MF1}=Search, Start, KD30, Acc) ->
+    io:format("~p~n",[Search]),
+    case e3d_kd3:take_nearest(Pos, KD30) of
 	{{_,Edge}=Next,KD31} ->
-	    {_P1, P2} = pick(Next),
-	    KD32 = e3d_kd3:delete_object({P2,Edge}, KD31),
-	    build_vtx_loop(P2, Start, KD32, [Next|Acc]);
+	    case pick(Next) of
+		{{_,MF1}, {Pos2,_} = P2} ->
+		    KD32 = e3d_kd3:delete_object({Pos2,Edge}, KD31),
+		    build_vtx_loop(P2, Start, KD32, [Next|Acc]);
+		{_, {Pos2,_} = P2} ->
+		    %% Wrong face, see if there is better alternative
+		    KD32 = e3d_kd3:delete_object({Pos2,Edge}, KD31),
+		    case e3d_kd3:take_nearest(Pos, KD32) of
+			{{_,Edge2}=Next2,_} ->
+			    case pick(Next2) of
+				{{Pos11,MF1}, {Pos21,_} = P21} ->
+				    KD33 = e3d_kd3:delete_object({Pos11,Edge2}, KD30),
+				    KD34 = e3d_kd3:delete_object({Pos21,Edge2}, KD33),
+				    build_vtx_loop(P21, Start, KD34, [Next2|Acc]);
+				_ ->
+				    KD32 = e3d_kd3:delete_object({Pos2,Edge}, KD31),
+				    build_vtx_loop(P2, Start, KD32, [Next|Acc])
+			    end;
+			_ ->
+			    KD32 = e3d_kd3:delete_object({Pos2,Edge}, KD31),
+			    build_vtx_loop(P2, Start, KD32, [Next|Acc])
+		    end
+	    end;
 	undefined ->
 	    {Acc, KD30}
     end.
 
-pick({P1, #{p1:=P1,p2:=P2}}) -> {P1,P2};
-pick({P2, #{p1:=P1,p2:=P2}}) -> {P2,P1}.
+pick({P1, #{p1:=P1,mf1:=MF1,p2:=P2,mf2:=MF2}}) -> {{P1,MF1},{P2,MF2}};
+pick({P2, #{p1:=P1,mf1:=MF1,p2:=P2,mf2:=MF2}}) -> {{P2,MF2},{P1,MF1}}.
 
 pick({_, #{p1:=P1,p2:=P2}}, Search) ->
     case e3d_vec:dist_sqr(P1, Search) < e3d_vec:dist_sqr(P2, Search) of
@@ -114,22 +154,18 @@ remove(#{id:=Id}, List) ->
 remove(H1, H2, List) ->
     remove(H1, remove(H2, List)).
 
-remap([#{mf1:=MF1,other:=MF2}|Is], Id1, M1, Id2, M2) ->
-    [remap_1(MF1, Id1, M1, Id2, M2),
-     remap_1(MF2, Id1, M1, Id2, M2)|
-     remap(Is, Id1, M1, Id2, M2)];
-remap([], _Id1, _M1, _Id2, _M2) -> [].
+remap(#{mf1:=MF1,mf2:=MF2,other:=Other}=Edge,
+      #{id:=Id1,map:=M1}, #{id:=Id2,map:=M2}) ->
+    Edge#{mf1:=remap_1(MF1, Id1, M1, Id2, M2),
+	  mf2:=remap_1(MF2, Id1, M1, Id2, M2),
+	  other:=remap_1(Other, Id1, M1, Id2, M2)}.
 
-remap_1({Id, TriFace}, Id1, M1, Id2, M2) ->
-    case lists:member(Id, Id1) of
-	true ->
-	    {_, Face} = array:get(TriFace, M1),
-	    {Id, Face};
-	false ->
-	    true = lists:member(Id, Id2),
-	    {_, Face} = array:get(TriFace, M2),
-	    {Id, Face}
-    end.
+remap_1({Id, TriFace}, Id, M1, _Id2, _M2) ->
+    {_, Face} = array:get(TriFace, M1),
+    {Id, Face};
+remap_1({Id, TriFace}, _Id, _M1, Id, M2) ->
+    {_, Face} = array:get(TriFace, M2),
+    {Id, Face}.
 
 %% Use wings_util:mapsfind
 mapsfind(Value, Key, [H|T]) ->

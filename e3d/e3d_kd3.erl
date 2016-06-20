@@ -163,7 +163,9 @@ to_list(Data, Acc) -> Data++Acc.
 %%% or undefined
 take_nearest({_,_,_}, #e3d_kd3{tree=[]}) -> undefined;
 take_nearest({_,_,_} = Point, Orig = #e3d_kd3{tree=Tree}) ->
-    [_|[Node|_]] = nearest_1(Point, Tree, [undefined|undefined]),
+    [_|[Node|_]=Closest] = nearest_1(Point, Tree, [undefined|undefined]),
+    Foo = [P1|| {P1,_} <- Closest],
+    io:format("Pick: ~p ~p~n=> ~p~n", [Point, Point =:= hd(Foo), Closest]),
     {Node, delete_object(Node,Orig)}.
 
 %%% @spec (Key::point(), Tree::e3d_kd3()) -> object() | undefined
@@ -191,7 +193,7 @@ nearest_2(Point, ThisSide, OtherSide, Border, Closest0) ->
 	Closest ->
 	    nearest_1(Point, OtherSide, Closest)
     end.
-    
+
 %%% @spec (Fun/2, Acc0::term(), Key::point(), Dist, Tree::e3d_kd3()) -> Acc::term()
 %%% @doc Traverse all Objects within Dist distance from point, notice that the order 
 %%% is not specified.
