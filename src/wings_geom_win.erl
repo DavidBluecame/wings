@@ -431,9 +431,14 @@ get_shape_state(St) ->
 get_shape_state({_,Client}, #st{pst=Pst}=St) ->
     Folds0 = gb_trees:get(?FOLDERS, Pst),
     {Current, Folds1} = Folds0,
-    Folds = [{Folder, State, length(ids_in_folder(Folder, St))}
-             || {Folder, {State, _}} <- Folds1],
     Ids = wings_sel:selected_ids(St),
+    SelIds = sets:from_list(Ids),
+    Folds =
+        lists:foldr(fun({Folder, {State, _}}, Acc) ->
+                        IdsInFolder = ids_in_folder(Folder, St),
+                        Common = sets:intersection(SelIds, sets:from_list(IdsInFolder)),
+                        [{Folder, State, length(IdsInFolder), not sets:is_empty(Common)}|Acc]
+                    end, [], Folds1),
     F = fun(Obj, A) -> [Obj|A] end,
     Shapes = wings_obj:fold(F, [], St),
     #{sel => Ids,
@@ -463,7 +468,6 @@ init([Frame, {W,_}, _Ps, Name, SS]) ->
     TC  = wxTreeCtrl:new(Splitter, [{style, TreeStyle}]),
     wxTreeCtrl:setBackgroundColour(TC, BG),
     wxTreeCtrl:setForegroundColour(TC, FG),
-    wxTreeCtrl:assignImageList(TC, load_icons()),
 
     LCStyle = ?wxLC_REPORT bor ?wxLC_NO_HEADER bor ?wxLC_EDIT_LABELS
         bor ?wxLC_SINGLE_SEL bor wings_frame:get_border(),
@@ -692,14 +696,15 @@ unsplit_window(Splitter, TC) ->
 update_folders({Curr, Fld0}, TC) ->
     Do = fun() ->
 		 wxTreeCtrl:deleteAllItems(TC),
-		 [{no_folder,_,S0}|Fld] = Fld0,
+		 [{no_folder,_,S0,_}|Fld] = Fld0,
 		 Caption0 = io_lib:format("~ts (~p)",[?__(1, "Objects"), S0]),
 		 Root = wxTreeCtrl:addRoot(TC, Caption0, []),
-
-		 Sorted = lists:sort([{wings_util:cap(F),F,S} || {F,_,S} <- Fld]),
-		 Add = fun({_, Name, Qtd}) ->
+		 Sorted = lists:sort([{wings_util:cap(F),F,S,Hs} || {F,_,S,Hs} <- Fld]),
+		 Add = fun({_, Name, Qtd, HasSel}) ->
 			    Caption = io_lib:format("~ts (~p)",[Name, Qtd]),
-			    {wxTreeCtrl:appendItem(TC, Root, Caption, []), Name}
+			    NewItem = wxTreeCtrl:appendItem(TC, Root, Caption, []),
+			    wxTreeCtrl:setItemBold(TC,NewItem,[{bold,HasSel}]),
+			    {NewItem, Name}
 		       end,
 		 Leaves = lists:map(Add, Sorted),
 		 wxTreeCtrl:expand(TC, Root),
@@ -860,7 +865,7 @@ connect_events(TC, LC) ->
     case os:type() of
     	{win32,_} ->
             %% list_item_right_click does not work outside of items
-            %% on windows catched by right|left_up above
+            %% on windows caught by right|left_up above
             wxWindow:connect(TC, command_right_click, []), %% Menu in empty tree area
             wxWindow:connect(LC, command_list_item_right_click, [callback]),
             wxWindow:connect(LC, command_left_click, [callback]);
@@ -1025,7 +1030,7 @@ object_menu(Id) ->
 
 help(Name) ->
     Msg = [?__(1, "Toggle operation"),
-	   wings_msg:mod_format(0, 3, ?__(2, "Toogle all visible objects or show menu")),
+	   wings_msg:mod_format(0, 3, ?__(2, "Toggle all visible objects or show menu")),
 	   wings_msg:mod_format(?SHIFT_BITS, 3, ?__(3, "Toggle objects in all folders"))],
     wings_status:message(Name, wings_msg:join(Msg)).
 

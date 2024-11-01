@@ -41,7 +41,7 @@ load() ->
             ok;
         PrefFile ->
             io:format("wings-~s\nReading preferences from: ~ts\n",
-                [?WINGS_VERSION, PrefFile]),
+                      [wings_u:version(), PrefFile]),
             case local_consult(PrefFile) of
                 {ok,List0} ->
                     List = clean(List0),
@@ -334,7 +334,7 @@ defaults() ->
      %% Advanced menus are always turned on now.
      %% The default must still be false for compatibility
      %% with older Wings versions. (We force it to true
-     %% later after laoding the user's preference file.)
+     %% later after loading the user's preference file.)
      {advanced_menus,false},
      {no_basic_menu_info,true},
 

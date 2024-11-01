@@ -463,7 +463,7 @@ select_way(Cuts,We,NMM = {Mode,_}) ->
 check_normal(Face,{Way,MM},We = #we{id=Id}) ->
     {MVM,_PM,_} = wings_u:get_matrices(Id, MM),
     Normal0 = wings_face:normal(Face,We),
-    {_,_,Z} = e3d_mat:mul_vector(MVM, Normal0),
+    {_,_,Z} = e3d_mat:mul_vector(e3d_transform:matrix(MVM), Normal0),
     if 
 	Way == normal, Z > 0.1 -> true;
 	Way == inverted, Z < -0.1 -> true;
@@ -517,7 +517,7 @@ line_intersect2d({X1,Y1,_},{X2,Y2,_},{X3,Y3,_},{X4,Y4,_}) ->
     line_intersect2d({X1,Y1},{X2,Y2},{X3,Y3},{X4,Y4});
 line_intersect2d({X1,Y1},{X2,Y2},{X3,Y3},{X4,Y4}) ->
     Div = ((Y4-Y3)*(X2-X1)-(X4-X3)*(Y2-Y1)),
-    if Div == 0.0 -> {false,{both,paralell}};
+    if Div == 0.0 -> {false,{both,parallel}};
        true ->
 	    Ua = ((X4-X3)*(Y1-Y3)-(Y4-Y3)*(X1-X3)) / Div,
 	    Ub = ((X2-X1)*(Y1-Y3)-(Y2-Y1)*(X1-X3)) / Div,
@@ -546,8 +546,8 @@ line_intersect2d({X1,Y1},{X2,Y2},{X3,Y3},{X4,Y4}) ->
 	    end
     end.
 
-obj_to_screen({MVM,PM,VP}, {X,Y,Z}) ->
-    wings_gl:project(X, Y, Z, MVM, PM, VP).
+obj_to_screen({MVM,PM,VP}, Pos) ->
+    e3d_transform:project(Pos, MVM, PM, VP).
 
 help(Cs = #cs{v=[]}) ->
     Msg1 = wings_msg:button_format(?__(1,"Select vertex or cut edge [press button to slide]")),
@@ -609,7 +609,8 @@ gldraw_connect(Pos0, Pos1) ->
     gl:color3f(0.0, 0.0, 0.0),
     gl:matrixMode(?GL_PROJECTION),
     gl:loadIdentity(),
-    glu:ortho2D(0.0, W, 0.0, H),
+    Ortho = e3d_transform:ortho(0.0, float(W), 0.0, float(H), -1.0, 1.0),
+    gl:loadMatrixd(e3d_transform:matrix(Ortho)),
     gl:matrixMode(?GL_MODELVIEW),
     gl:loadIdentity(),
     wings_vbo:draw(fun(_) ->

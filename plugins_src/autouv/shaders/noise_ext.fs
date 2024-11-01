@@ -34,7 +34,7 @@ varying vec3 w3d_pos;
 // Noise for GLSL 1.20 by Ashima
 // https://github.com/ashima/webgl-noise/wiki
 //
-// Common code to Simplex and Perlin noise bellow
+// Common code to Simplex and Perlin noise below
 // ***************************************************************************
 vec4 permute(vec4 x) {
   return mod(((x*34.0)+1.0)*x, 289.0);
@@ -348,7 +348,7 @@ vec3 rotate(vec3 pos, float a, float b, float y) {
     vec3 posn = normalize(pos);
     float ca = cos(-a);  // alpha
     float cb = cos(b);  // beta
-    float cy = cos(-y); // gama | [-] from left to righ hand
+    float cy = cos(-y); // gama | [-] from left to right hand
     float sa = sin(-a);
     float sb = sin(b);
     float sy = sin(-y);

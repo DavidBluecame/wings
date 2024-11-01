@@ -56,7 +56,13 @@ start(Op, #we{id=Id}=We0, OrigWe, St0) ->
 
     St = St1#st{sel=[],selmode=face,shapes=gb_trees:from_orddict([{Id,We}])},
     Ss = seg_init_message(#seg{selmodes=Modes,st=St,orig_st=St0,we=OrigWe,fs=Fs}),
-    
+
+    %% Set camera on object/faces
+    RemoveOthers = fun(Sel, #we{id=SelId}) when SelId =:= Id -> Sel;
+                      (_, _) -> gb_sets:empty()
+                   end,
+    wings_view:command(frame, wings_sel:update_sel(RemoveOthers, St0)),
+
     %% Don't push here - instead replace the default crash handler
     %% which is the only item on the stack.
     get_seg_event(Ss).
@@ -390,23 +396,22 @@ seg_map_charts_1([We0|Cs], Type, Id, N, Acc,Failed,Ss) ->
 seg_map_charts_1([],_, _, _,Charts0,Failed,
 		 Ss = #seg{orig_st=GeomSt0,fs=Fs,st=St0,we=#we{id=Id}}) ->
     wings_pb:done(),
-    wings_dl:delete_dlists(),
-    if Charts0 == [] -> 
+    if Charts0 == [] ->
 	    wings_u:message(Ss#seg.err),
 	    get_seg_event(seg_init_message(Ss));
        true ->
 	    Charts = reverse(Charts0),
 	    We = gb_trees:get(Id, GeomSt0#st.shapes),
 	    GeomSt = wpc_autouv:init_show_maps(Charts, Fs, We, GeomSt0),
-	    case Failed of 
-		[] -> 
+	    case Failed of
+		[] ->
 		    cleanup_before_exit(),
 		    delete;
 		_ ->
 		    wings_u:message(Ss#seg.err),
 		    #st{shapes=Shs} = St0,
 		    [We0] = gb_trees:values(Shs),
-		    Keep = foldl(fun(#we{fs=Ftab},Acc) -> 
+		    Keep = foldl(fun(#we{fs=Ftab},Acc) ->
 					 New = gb_sets:from_ordset(gb_trees:keys(Ftab)),
 					 gb_sets:union(New,Acc)
 				 end, gb_sets:empty(), Failed),

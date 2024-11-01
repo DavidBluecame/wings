@@ -544,7 +544,7 @@ select_group({Mode,_}=Key, #st{ssels=Ssels}=St) ->
     St#st{selmode=Mode,sel=ValidSel}.
 
 %%%% Delete Groups that return an empty selection. Invalid ssels can result from
-%%%% creating or deleting geomerty.
+%%%% creating or deleting geometry.
 delete_invalid_groups(#st{ssels=Ssels}=St0) ->
     case gb_trees:is_empty(Ssels) of
       true ->
@@ -601,7 +601,7 @@ save_group(Key, Sel, #st{ssels=Ssels0}=St) ->
 
 new_group(_) ->
     wings_dialog:ask(?__(1,"Create New Group"),
-		     [{?__(2,"Group Name"), ""}],
+		     [{?__(2,"Group Name"), "",[{width,22}]}],
 		     fun([String]) -> {select,{new_group_name,String}} end).
 
 new_group_name(Name, #st{ssels=Ssels0,selmode=Mode,sel=Sel}=St) ->
@@ -796,7 +796,7 @@ vertex_dots_and_sqlens(Vecs, [VecB|_], Dot, Sq) ->
     vertex_dots_and_sqlens(Vecs++[VecB], [], Dot, Sq);
 vertex_dots_and_sqlens(_Other, _More, Dot, Sq) -> {Dot,Sq}.
 
--define(EPSILON, 1.0E-5).
+-define(TOLERANCE, 1.0E-5).
 compare(A, B) ->
     %% Comparison with a relative tolerance for large
     %% values and an absolute tolerance for small values
@@ -804,7 +804,7 @@ compare(A, B) ->
     %% http://realtimecollisiondetection.net/blog/?p=89
     %% and in his book "Real-Time Collision Detection".
     %%
-    abs(A-B) =< ?EPSILON*max(1.0, max(abs(A), abs(B))).
+    abs(A-B) =< ?TOLERANCE*max(1.0, max(abs(A), abs(B))).
 
 %%
 %% Select Random.

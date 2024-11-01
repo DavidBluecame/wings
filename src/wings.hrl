@@ -30,8 +30,6 @@
 
 -include_lib("wx/include/wx.hrl").
 
--define(WINGS_VERSION, ?wings_version).
-
 -define(CHAR_HEIGHT, wings_text:height()).
 -define(CHAR_WIDTH, wings_text:width()).
 
@@ -44,6 +42,9 @@
 -define(F32,  32/float-native).
 -define(I32,  32/signed-native).
 -define(UI32, 32/native).
+-ifndef(EPSILON).
+-define(EPSILON, 1.0e-7).
+-endif.
 
 -define(PANE_COLOR, {0.52,0.52,0.52}).
 -define(BEVEL_HIGHLIGHT, {0.9,0.9,0.9}).
@@ -270,7 +271,7 @@
          vab=none :: 'none' | vab(),            %Vertex array (see below)
          tri_map=none :: 'none' | wings_pick:tri_map(), %Tri -> Face map (for picking)
 
-	 %% Miscellanous.
+	 %% Miscellaneous.
          hilite=none ::
            'none' | {wings_sel:mode(),wings_dl:dl()},  %Hilite display list.
          mirror=none ::
@@ -293,7 +294,7 @@
                     | wings_drag:drag()
                     | wings_tweak:drag()
                     | {matrix,_,_,e3d_mat:matrix()}, %For dragging.
-         transparent=false :: boolean() | #we{}, %Object includes transparancy.
+         transparent=false :: boolean() | #we{}, %Object includes transparency.
          open=false :: boolean(),               %Open (has hole).
 
 	 %% List of display lists known to be needed only based

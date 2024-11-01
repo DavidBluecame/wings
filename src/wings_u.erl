@@ -16,7 +16,7 @@
 	 get_matrices/2, geom_windows/0,
 	 yes_no/2,yes_no/3,yes_no_cancel/3,
 	 win_crash/1,win_crash/2,crash_log/2,crash_log/3,
-	 pretty_filename/1,relative_path_name/2,caption/1,
+	 pretty_filename/1,relative_path_name/2,caption/1,version/0,
          basedir/1, win32_special_folder/2, is_exported/3, id/1]).
 
 -define(NEED_OPENGL, 1).
@@ -40,19 +40,26 @@ message(Message) ->
 	  [{buttons,[ok]}]},
     wings_dialog:dialog("", Qs, fun(_) -> ignore end).
 
+-spec version() -> string().
+version() ->
+    ?wings_version.
+
 geom_windows() ->
     geom_windows_1(wings_wm:windows()).
 
+-spec get_matrices(Id::integer(), mirror|original) ->
+          {e3d_transform:transform(), e3d_transform:transform(), {0,0,W::non_neg_integer(),H::non_neg_integer()}}.
 get_matrices(Id, MM) ->
     {TPM, TMV0, _} = wings_view:load_matrices(false),
     TMV = case MM of
 	      mirror ->
 		  Matrix = wings_dl:mirror_matrix(Id),
-		  e3d_mat:mul(e3d_transform:matrix(TMV0),Matrix);
-	      original -> e3d_transform:matrix(TMV0)
+                  Mirror = e3d_transform:init(Matrix),
+		  e3d_transform:mul(TMV0,Mirror);
+	      original -> TMV0
 	  end,
     {_,_,W,H} =  wings_wm:viewport(),
-    {TMV,e3d_transform:matrix(TPM),{0,0,W,H}}.
+    {TMV,TPM,{0,0,W,H}}.
 
 yes_no(Question, Yes) ->
     yes_no(Question, Yes, ignore).
@@ -87,7 +94,11 @@ crash_log(WinName, Reason, StackTrace) ->
     LogName = filename:absname("wings_crash.dump", LogFileDir),
     F = open_log_file(LogName),
     io:format("Internal Error~n",[]),
-    [io:format(Fd, "Version: ~s\n", [?WINGS_VERSION]) || Fd <- [F, group_leader()]],
+    [io:format(Fd, "Version: ~s\n", [?wings_version]) || Fd <- [F, group_leader()]],
+    [io:format(Fd, "Window: ~p\n", [WinName])  || Fd <- [F, group_leader()]],
+    [io:format(Fd, "Reason: ~P\n\n", [Reason,20]) || Fd <- [F, group_leader()]],
+    report_stacktrace(F, StackTrace),
+    analyse(F, StackTrace),
     try
         OsDesc = wx_misc:getOsDescription(),
         {GLVend, GLRend} = {gl:getString(?GL_VENDOR), gl:getString(?GL_RENDERER)},
@@ -96,10 +107,6 @@ crash_log(WinName, Reason, StackTrace) ->
     catch
 	_:_ -> ignore
     end,
-    [io:format(Fd, "Window: ~p\n", [WinName])  || Fd <- [F, group_leader()]],
-    [io:format(Fd, "Reason: ~P\n\n", [Reason,20]) || Fd <- [F, group_leader()]],
-    report_stacktrace(F, StackTrace),
-    analyse(F, StackTrace),
     file:close(F),
     LogName.
 
@@ -184,7 +191,7 @@ get_rel_path(_,Src) -> Src.   % paths are in a different Drive - ignore routine
 get_rel_path([]=_Dst, []=_Src, Acc) -> Acc;     % export and file dir are the same
 get_rel_path([_|T], [], Acc) ->             % file is in some dir level in the Dst
     get_rel_path(T,[],["../"]++Acc);
-get_rel_path([], [H|T], Acc)->              % all previous dir match - file is in uppper dir level
+get_rel_path([], [H|T], Acc)->              % all previous dir match - file is in upper dir level
     get_rel_path([],T,[H]++Acc);
 get_rel_path([H|T0], [H|T1], Acc) ->        % continue checking in next dir level
     get_rel_path(T0,T1,Acc);

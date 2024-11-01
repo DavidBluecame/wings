@@ -208,7 +208,7 @@ init() ->
 %% Display a text window (Info converted to html)
 info(Title, Info, Options) ->
     Parent = proplists:get_value(parent, Options, get_dialog_parent()),
-    Flags  = [{size, {500, 400}}, {style, ?wxCAPTION bor ?wxRESIZE_BORDER bor ?wxCLOSE_BOX}],
+    Flags  = [{size, {500, 400}}, {style, ?wxCAPTION bor ?wxRESIZE_BORDER bor ?wxCLOSE_BOX bor ?wxFRAME_FLOAT_ON_PARENT}],
     Frame  = wxFrame:new(Parent, ?wxID_ANY, Title, Flags),
     Panel  = wxHtmlWindow:new(Frame, []),
     Sizer  = wxBoxSizer:new(?wxVERTICAL),
@@ -228,7 +228,7 @@ dialog_preview(Cmd, Bool, Title, Qs, St) ->
     dialog_1(Bool, Title, preview, Qs, preview_fun(Cmd, St)).
 
 %% Currently a modal dialog
-%%   (orginal wings let camera events trough)
+%%   (original wings let camera events through)
 ask(Title, Qs0, Fun) ->
     {PreviewCmd, Qs} = preview_cmd(Qs0),
     dialog_1(true, Title, PreviewCmd, queries(Qs), Fun).
@@ -472,18 +472,17 @@ enter_dialog(true, PreviewType, Dialog, Fields, Fun) ->
     Env = wx:get_env(),
     Pid = spawn_link(fun() ->
 			     wx:set_env(Env),
-			     Forward = fun(Event, _) ->
-					       wxDialog:show(Dialog, [{show,false}]),
-					       wings_wm:psend(dialog_blanket, Event)
-				       end,
-
-			     wxDialog:connect(Dialog, command_button_clicked,
-					      [{id, ?wxID_OK},
-					       {lastId, ?wxID_NO},
-					       {callback,Forward}]),
 			     set_dialog_parent(Dialog),
-			     wxDialog:show(Dialog),
 			     wings_wm:psend(send_after_redraw, dialog_blanket, preview),
+                             case is_modal(PreviewType) of
+                                 false ->
+                                     setup_non_modal(Dialog),
+                                     wxDialog:show(Dialog);
+                                 true ->
+                                     %% wx bug (mac modal) workaround fixed in 21.3?
+                                     os:type() == {unix,darwin} andalso timer:sleep(200),
+                                     send_modal_result(Dialog, wxDialog:showModal(Dialog))
+                             end,
 			     receive
 				 closed ->
 				     reset_dialog_parent(Dialog),
@@ -496,8 +495,34 @@ enter_dialog(true, PreviewType, Dialog, Fields, Fun) ->
     Op = {push,fun(Ev) -> event_handler(Ev, State) end},
     {TopW,TopH} = wings_wm:top_size(),
     wings_wm:new(dialog_blanket, {0,0,highest}, {TopW,TopH}, Op),
+    wxDialog:connect(Dialog, destroy),
+    wxDialog:connect(Dialog, activate),
     wings_wm:grab_focus(dialog_blanket),
     keep.
+
+is_modal(Atom) when is_atom(Atom) ->
+    case Atom of
+        %% Fool dialyzer
+        prepared_for_non_modal_dialogs -> false;
+        _ -> true
+    end;
+is_modal(_PreviewType) ->
+    true.
+
+setup_non_modal(Dialog) ->
+    Forward = fun(Event, _) ->
+                      wxDialog:show(Dialog, [{show,false}]),
+                      wings_wm:psend(dialog_blanket, Event)
+              end,
+    wxDialog:connect(Dialog, command_button_clicked,
+                     [{id, ?wxID_OK},
+                      {lastId, ?wxID_NO},
+                      {callback,Forward}]).
+
+send_modal_result(Dialog, Res) ->
+    CmdEv = #wxCommand{type=command_button_clicked, cmdString="", commandInt=Res, extraLong = 0},
+    Event = #wx{id=Res, obj=Dialog, event=CmdEv},
+    wings_wm:psend(dialog_blanket, Event).
 
 notify_event_handler(false, _Msg) -> fun() -> ignore end;
 notify_event_handler(no_preview, _) -> fun() -> ignore end;
@@ -512,8 +537,7 @@ close(Pid) ->
     Pid ! closed,
     receive {'DOWN',Ref,process,_,_} -> ok end.
 
-event_handler(#wx{id=?wxID_CANCEL},
-	      #eh{apply=Fun, owner=Owner, type=Preview, pid=Pid}=Eh0) ->
+cancel_dialog(#eh{apply=Fun, owner=Owner, type=Preview, pid=Pid}=Eh0) ->
     reset_timer(Eh0),
     wings_wm:release_focus(),
     case Preview of
@@ -524,10 +548,13 @@ event_handler(#wx{id=?wxID_CANCEL},
 	    wings_wm:send(Owner, cancel)
     end,
     close(Pid),
-    delete;
-event_handler(#wx{id=Result}=_Ev,
+    delete.
+
+event_handler(#wx{id=?wxID_CANCEL}, Eh0) ->
+    cancel_dialog(Eh0);
+event_handler(#wx{id=Result, event=#wxCommand{}}=_Ev,
 	      #eh{fs=Fields, apply=Fun, owner=Owner, pid=Pid} = Eh0) ->
-    %%io:format("Ev closing ~p~n  ~p~n",[_Ev, Fields]),
+    %%?dbg("Ev closing ~p~n  ~p~n",[_Ev, Fields]),
     reset_timer(Eh0),
     wings_wm:release_focus(),
     Values = get_output(Result, Fields),
@@ -536,12 +563,12 @@ event_handler(#wx{id=Result}=_Ev,
     catch throw:{command_error,_} = Error ->
 	    wings_wm:send(Owner, Error);
           _:Reason:ST ->
-            io:format("Dialog preview crashed: ~p~n~p~n",[Reason, ST])
+            ?dbg("Dialog preview crashed: ~p~n~p~n",[Reason, ST])
     end,
     delete;
 event_handler(preview, Eh0) ->
     Eh = reset_timer(Eh0),
-    New = wings_wm:set_timer(150, preview_exec),
+    New = wings_wm:set_timer(250, preview_exec),
     {replace, fun(Ev) -> event_handler(Ev, Eh#eh{timer=New}) end};
 event_handler(preview_exec, #eh{fs=Fields, apply=Fun, owner=Owner}=Eh0) ->
     Eh = reset_timer(Eh0),
@@ -559,7 +586,7 @@ event_handler(preview_exec, #eh{fs=Fields, apply=Fun, owner=Owner}=Eh0) ->
 	    %%io:format("~p:~p: ~p~n",[?MODULE,?LINE,{preview,[Owner,{action,Action}]}]),
 	    wings_wm:send(Owner, {action,Action})
     catch _:Reason:ST ->
-            io:format("Dialog preview crashed: ~p~n~p~n",[Reason, ST])
+            ?dbg("Dialog preview crashed: ~p~n~p~n",[Reason, ST])
     end,
     {replace, fun(Ev) -> event_handler(Ev, Eh) end};
 event_handler(#mousebutton{which=Obj}=Ev, _) ->
@@ -571,8 +598,16 @@ event_handler(got_focus, #eh{dialog=Dialog}) ->
     %% wxWidgets MacOSX workaround to keep dialog on top
     wxWindow:raise(Dialog),
     keep;
+event_handler(user_attention, #eh{dialog=Dialog}) ->
+    wxTopLevelWindow:requestUserAttention(Dialog),
+    keep;
+event_handler(#wx{event=#wxWindowDestroy{}}, Eh0) ->
+    cancel_dialog(Eh0);
+event_handler(lost_focus, #eh{dialog=Dialog}) ->
+    wxWindow:setFocus(Dialog),
+    keep;
 event_handler(_Ev, _) ->
-    %% io:format("unhandled Ev ~p~n",[_Ev]),
+    %% ?dbg("unhandled Ev ~P~n",[_Ev, 20]),
     keep.
 
 reset_timer(#eh{timer=undefined} = Eh) ->
@@ -689,7 +724,8 @@ setup_hook(#in{key=Key, wx=Ctrl, type=radiobox, hook=UserHook, data=Keys}, Field
 					 UserHook(Key, Sel, Fields)
 				 end}]),
     UserHook(Key, lists:nth(1+wxRadioBox:getSelection(Ctrl),Keys),Fields);
-setup_hook(#in{key=Key, wx=Ctrl, type=text, hook=UserHook, wx_ext=Ext, def=Def, validator=Validate}, Fields) ->
+setup_hook(#in{key=Key, wx=Ctrl, type=text, hook=UserHook, wx_ext=Ext, def=Def,
+               data=Conversion, validator=Validate}, Fields) ->
     wxWindow:connect(Ctrl, command_text_updated,
 		     [{callback, fun(#wx{event=#wxCommand{cmdString=Str}}, Obj) ->
 					 wxEvent:skip(Obj),
@@ -699,23 +735,25 @@ setup_hook(#in{key=Key, wx=Ctrl, type=text, hook=UserHook, wx_ext=Ext, def=Def, 
 				 end}]),
     case Ext of
 	[Slider] ->
-        wxTextCtrl:connect(Ctrl, mousewheel,
-                 [{callback, fun(#wx{event=#wxMouse{type=mousewheel}=EvMouse}, Obj) ->
-                         wxEvent:skip(Obj),
-                         Str = text_wheel_move(Def,wxTextCtrl:getValue(Ctrl),EvMouse),
-                         case Validate(Str) of
-                             {true, Val} ->
-                                 UserHook(Key, Val, Fields),
-                                 ok;
-                             _ -> ok
-                         end
-                     end}]),
-        wxSlider:connect(Slider, scroll_thumbtrack,
-                 [{callback, fun(#wx{event=#wxScroll{commandInt=Val}}, Obj) ->
-                         wxEvent:skip(Obj),
-                         UserHook(Key, Val, Fields),
-                         ok
-                     end}]);
+            {FromSlider,ToSlider} = Conversion,
+            ScrollText = fun(#wx{event=#wxMouse{type=mousewheel}=Ev}, Obj) ->
+                                 wxEvent:skip(Obj),
+                                 case Validate(wxTextCtrl:getValue(Ctrl)) of
+                                     {true, V0} ->
+                                         Val = text_wheel_move(V0,Ev,ToSlider,FromSlider),
+                                         UserHook(Key, Val, Fields),
+                                         ok;
+                                     _Fail ->
+                                         ok
+                                 end
+                         end,
+            ScrollSlider = fun(#wx{event=#wxCommand{commandInt=Val}}, Obj) ->
+                                   wxEvent:skip(Obj),
+                                   UserHook(Key, FromSlider(Val), Fields),
+                                   ok
+                           end,
+            wxTextCtrl:connect(Ctrl, mousewheel, [{callback, ScrollText}]),
+            wxSlider:connect(Slider, command_slider_updated, [{callback, ScrollSlider}]);
 	_ -> ignore
     end,
     UserHook(Key,validate(Validate, wxTextCtrl:getValue(Ctrl), Def),Fields);
@@ -726,8 +764,8 @@ setup_hook(#in{key=Key, wx=Ctrl, type=button, hook=UserHook}, Fields) ->
 				 end}]),
     ok;
 setup_hook(#in{key=Key, wx=Ctrl, type=slider, hook=UserHook, data={FromSlider,_}}, Fields) ->
-    wxSlider:connect(Ctrl, scroll_thumbtrack,
-		     [{callback, fun(#wx{event=#wxScroll{commandInt=Val}}, _) ->
+    wxSlider:connect(Ctrl, command_slider_updated,
+		     [{callback, fun(#wx{event=#wxCommand{commandInt=Val}}, _) ->
 					 UserHook(Key, FromSlider(Val), Fields)
 				 end}]),
     ok;
@@ -850,7 +888,10 @@ build_dialog(AskType, Title, Qs) ->
 			     {Dialog, DialogData}
 		     catch Class:Reason:ST ->
 			     %% Try to clean up
-			     reset_dialog_parent(Dialog),
+			     case ?GET(dialog_parent) of
+			         [] -> ignore;
+			         _ -> reset_dialog_parent(Dialog)
+			     end,
 			     wxDialog:destroy(Dialog),
 			     erlang:raise(Class, Reason, ST)
 		     end
@@ -1078,11 +1119,11 @@ build(Ask, {text, Def, Flags}, Parent, Sizer, In) ->
 build(Ask, {slider, {text, Def, Flags}}, Parent, Sizer, In) ->
     SizeVal = {_,Validator} = validator(Def, Flags),
     Create = fun() -> create_slider(Ask, Def, Flags, SizeVal, Parent, Sizer) end,
-    {Ctrl,CtrlExt} = case create(Ask,Create) of
-			 undefined -> {undefined, []};
+    {Ctrl,CtrlExt, Data} = case create(Ask,Create) of
+			 undefined -> {undefined, [], Def};
 			 Ctrls -> Ctrls
 		     end,
-    [#in{key=proplists:get_value(key,Flags), def=Def,
+    [#in{key=proplists:get_value(key,Flags), def=Def, data=Data,
 	 hook=proplists:get_value(hook, Flags),
 	 type=text, wx=Ctrl, wx_ext=CtrlExt, validator=Validator}|In];
 
@@ -1238,7 +1279,7 @@ build(Ask, {button, Label, Action, Flags}, Parent, Sizer, In) ->
 	       done ->
 		   UserHook = proplists:get_value(hook, Flags),
 		   fun(Key, button_pressed, Store) ->
-			   wings_dialog:set_value(Key, true, Store),
+			   set_value(Key, true, Store),
 			   UserHook == undefined orelse
 			       UserHook(Key, button_pressed, Store)
 		   end;
@@ -1488,7 +1529,7 @@ build_textctrl(Ask, Def, Flags, {MaxSize, Validator}, Parent, Sizer) ->
 	    wxTextCtrl:setMaxSize(Ctrl, {MaxSize*CharWidth, -1});
 	Width when is_integer(Width) ->
 	    wxTextCtrl:setMaxSize(Ctrl, {CharWidth*(Width+1), -1}),
-	    wxTextCtrl:setMaxSize(Ctrl, {CharWidth*Width, -1});
+	    wxTextCtrl:setMinSize(Ctrl, {CharWidth*Width, -1});
 	undefined -> %% Let the sizer handle the max and min sizes
 	    ok
     end,
@@ -1505,10 +1546,10 @@ build_textctrl(Ask, Def, Flags, {MaxSize, Validator}, Parent, Sizer) ->
         _ ->
 	    UpdateTextWheel =
 		fun(#wx{event=#wxMouse{type=mousewheel}=EvMouse}, _) ->
-			Str = text_wheel_move(Def,wxTextCtrl:getValue(Ctrl),EvMouse),
-			case Validator(Str) of
-			    {true, Val} ->
+			case Validator(wxTextCtrl:getValue(Ctrl)) of
+			    {true, V0} ->
 				PreviewFun(),
+                                Val = text_wheel_move(Def,V0,EvMouse,Validator),
 				wxTextCtrl:setValue(Ctrl, to_str(Val));
 			    _ ->
 				ignore
@@ -1574,16 +1615,16 @@ create_slider(Ask, Def, Flags, {MaxSize,Validator}, Parent, TopSizer) when is_nu
 			 wxTextCtrl:changeValue(Text, to_str(ToText(Where)))
 		 end,
     wxSlider:connect(Slider, command_slider_updated, [{callback, UpdateText}]),
-    UpdateTextWheel = fun(#wx{event=#wxMouse{type=mousewheel}=EvMouse}, _) ->
-			  Str = text_wheel_move(Def,wxTextCtrl:getValue(Text),EvMouse),
-			  case Validator(Str) of
-			      {true, Val} ->
-				  PreviewFun(),
-				  wxSlider:setValue(Slider, ToSlider(Val)),
-				  wxTextCtrl:changeValue(Text, to_str(Val));
-			      _ ->
-				  ignore
-			  end
+    UpdateTextWheel = fun(#wx{event=#wxMouse{type=mousewheel}=Ev}, _) ->
+                              case Validator(wxTextCtrl:getValue(Text)) of
+                                  {true, V0} ->
+                                      Val = text_wheel_move(V0, Ev, ToSlider, ToText),
+                                      PreviewFun(),
+                                      wxSlider:setValue(Slider, ToSlider(Val)),
+                                      wxTextCtrl:changeValue(Text, to_str(Val));
+                                  _ ->
+                                      ignore
+                              end
 		      end,
     wxTextCtrl:connect(Text, mousewheel, [{callback, UpdateTextWheel}]),
     UpdateSlider = fun(#wx{event=#wxCommand{cmdString=Str}}, _) ->
@@ -1596,21 +1637,34 @@ create_slider(Ask, Def, Flags, {MaxSize,Validator}, Parent, TopSizer) when is_nu
 			   end
 		   end,
     wxTextCtrl:connect(Text, command_text_updated, [{callback, UpdateSlider}]),
-    {Text,[Slider]}.
+    {Text,[Slider], {ToText, ToSlider}}.
 
 slider_style(Def, {Min, Max})
   when is_integer(Def), Def >= Min, Def =< Max, Min < Max ->
-    ToInt = fun(Value) -> Value end,
+    ToInt = fun(Value) ->
+                    if Value < Min -> round(Min);
+                       Value > Max -> round(Max);
+                       true -> round(Value)
+                    end
+            end,
     {Min, Def, Max, ?wxSL_HORIZONTAL, ToInt, ToInt};
 slider_style(Def, {Min, Max})
   when is_float(Def), Def >= Min, Def =< Max, Min < Max ->
     ToSlider = fun(Value) ->
 		       Step = (Max - Min) / 100,
-		       round((Value - Min) / Step)
+		       case round((Value - Min) / Step) of
+                           V when V > 100 -> 100;
+                           V when V < 0 -> 0;
+                           V -> V
+                       end
 	       end,
     ToText = fun(Percent) ->
 		     Step = (Max - Min) / 100,
-		     Min + Percent * Step
+		     case Min + Percent * Step of
+                         V when V > Max -> Max;
+                         V when V < Min -> Min;
+                         V -> V
+                     end
 	     end,
     {0, ToSlider(Def), 100, ?wxSL_HORIZONTAL, ToText, ToSlider};
 slider_style(Def, {Min, Max}=MM) when Min < Max ->
@@ -2013,25 +2067,26 @@ constraint_factor(#wxMouse{altDown=A,shiftDown=S,metaDown=M,controlDown=R}) ->
 	C -> wings_pref:get_value(con_dist_ctrl);
 	S -> wings_pref:get_value(con_dist_shift);
 	A -> wings_pref:get_value(con_dist_alt);
-	true -> none
+	true -> 1
     end.
 
-text_wheel_move(Def, Value, #wxMouse{wheelRotation=Count,wheelDelta=Delta}=EvMouse) ->
-    Incr = case constraint_factor(EvMouse) of
-	       none -> 1;
-	       Other -> Other
-	   end,
-    try
-	case is_integer(Def) of
-	    true ->
-		CurValue = list_to_integer(Value),
-		Increment = round(Incr),
-		integer_to_list(CurValue +round((Count/Delta)*Increment));
-	    _ ->
-		CurValue = wings_util:string_to_float(Value),
-		Increment = Incr,
-		float_to_list(CurValue +((Count/Delta)*Increment))
-	end
-    catch _:_ ->
-	    Value
-    end.
+text_wheel_move(Def, Value, #wxMouse{wheelRotation=Count,wheelDelta=Delta}=EvMouse, Validator) ->
+    Incr = constraint_factor(EvMouse),
+    New = case is_integer(Def) of
+              true ->
+                  Increment = round(Incr),
+                  Value + round((Count/Delta)*Increment);
+              _ ->
+                  Increment = Incr,
+                  Value + ((Count/Delta)*Increment)
+          end,
+    case Validator(to_str(New)) of
+        {true, Val} -> Val;
+        _         -> Value
+    end;
+text_wheel_move(Value, #wxMouse{wheelRotation=Count,wheelDelta=Delta}=EvMouse, ToSlider, FromSlider) ->
+    Percent = ToSlider(Value),
+    Incr = constraint_factor(EvMouse),
+    ValPercent =  Percent + (Count/Delta)*Incr,
+    FromSlider(ValPercent).
+

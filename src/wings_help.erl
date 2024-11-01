@@ -207,7 +207,7 @@ performance_tips(Head) ->
 	   ?__(5,"type of graphics card"),
 	   ?__(6,"amount of video memory"),
 	   ?__(7,"the phase of the moon") ++
-	       ?__(8,"Therefore, it is difficult to give any firm advice on how to improve Wings performance. The following tips MAY improve performance:"),
+	       ?__(8," Therefore, it is difficult to give any firm advice on how to improve Wings performance. The following tips MAY improve performance:"),
 
 	   ?__(31,"Use fewer Undo levels. Setting to 4 or less (default 32) will let you work on models with almost 8 times the detail. In this case, using a shorter autosave period (default 10mins) may be advisable."),
 
@@ -217,7 +217,7 @@ performance_tips(Head) ->
 
 	   ?__(11,"Make sure that Geometry windows don't overlap."),
 
-	   ?__(12,"Use as few (active) lights as possible. More lights means less speed on most grahics cards."),
+	   ?__(12,"Use as few (active) lights as possible. More lights means less speed on most graphics cards."),
 
 	   ?__(13,"If possible, use the ")
 	   ++cmd([?__(14,"Tools"),
@@ -406,8 +406,9 @@ about(_) ->
     Flags  = [{style, ?wxCAPTION bor ?wxCLOSE_BOX bor ?wxFRAME_FLOAT_ON_PARENT}],
     Frame = wxFrame:new(?GET(top_frame), ?wxID_ANY, ?__(1, "About"), Flags),
     Icons = wings_frame:get_icon_images(),
-    {_Panel,Szr} = about_panel(Frame, Icons),
-    wxSizer:setSizeHints(Szr, Frame),
+    {Panel,Szr} = about_panel(Frame, Icons),
+    wxSizer:setSizeHints(Szr, Panel),
+    wxWindow:fit(Frame),
     wxWindow:centerOnParent(Frame),
     wxWindow:show(Frame),
     wxWindow:setFocus(Frame),
@@ -479,7 +480,7 @@ redraw(#wx{obj=TopPanel, userData=Img}, Obj) ->
     Font1 = wxFont:new(11, ?wxDEFAULT, ?wxNORMAL, ?wxFONTWEIGHT_BOLD),
     wxGraphicsContext:setFont(GC, Font1, {200,200,200}),
     {_,H0,_,_} = wxGraphicsContext:getTextExtent(GC, "v2"),
-    wxGraphicsContext:drawText(GC, "v" ++ ?WINGS_VERSION, ?lblVerX, ?lblVerY-H0),
+    wxGraphicsContext:drawText(GC, "v" ++ wings_u:version(), ?lblVerX, ?lblVerY-H0),
     wxFont:destroy(Font1),
 
     %% Drawing Wings3D description
@@ -513,7 +514,7 @@ splash_contents() ->
      ?__(4,"but is completely free for any kind of use") ++ "\n" ++
      ?__(5,"(including commercial)."),
 
-     ?__(6,"Copyright") ++ [$\s,169] ++ " 2001-2019 Björn Gustavsson" ++ "\n" ++
+     ?__(6,"Copyright") ++ [$\s,169] ++ " 2001-2022 Björn Gustavsson" ++ "\n" ++
      "Dan Gudmundsson" ++ ?__(7," and Others")
     ].
 

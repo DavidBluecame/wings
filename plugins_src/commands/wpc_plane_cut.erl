@@ -407,12 +407,12 @@ get_point_positions(Pos0, Dist, Axis, N) ->
 %%% Body mode
 %%%
 
-intersects({1.0,0.0,0.0}=Plane, {X,_,_}=CutPoint, #we{es=Etab,vp=Vtab}) ->
+intersects({1.0,+0.0,+0.0}=Plane, {X,_,_}=CutPoint, #we{es=Etab,vp=Vtab}) ->
     array:sparse_foldl(fun
       (Edge, #edge{vs=Va,ve=Vb}, EdgesToCut1) ->
         {Xa,_,_} = PosA = array:get(Va, Vtab),
         {Xb,_,_} = PosB = array:get(Vb, Vtab),
-        case oposite_sides(Xa, Xb, X) of
+        case opposite_sides(Xa, Xb, X) of
           true ->
             EdgeVec = e3d_vec:norm_sub(PosA, PosB),
              case abs(e3d_vec:dot(Plane, EdgeVec)) < ?NON_ZERO of
@@ -424,12 +424,12 @@ intersects({1.0,0.0,0.0}=Plane, {X,_,_}=CutPoint, #we{es=Etab,vp=Vtab}) ->
           false -> EdgesToCut1
         end
     end, [], Etab);
-intersects({0.0,1.0,0.0}=Plane, {_,Y,_}=CutPoint, #we{es=Etab,vp=Vtab}) ->
+intersects({+0.0,1.0,+0.0}=Plane, {_,Y,_}=CutPoint, #we{es=Etab,vp=Vtab}) ->
     array:sparse_foldl(fun
       (Edge, #edge{vs=Va,ve=Vb}, EdgesToCut1) ->
         {_,Ya,_} = PosA = array:get(Va, Vtab),
         {_,Yb,_} = PosB = array:get(Vb, Vtab),
-        case oposite_sides(Ya, Yb, Y) of
+        case opposite_sides(Ya, Yb, Y) of
           true ->
             EdgeVec = e3d_vec:norm_sub(PosA, PosB),
              case abs(e3d_vec:dot(Plane, EdgeVec)) < ?NON_ZERO of
@@ -441,12 +441,12 @@ intersects({0.0,1.0,0.0}=Plane, {_,Y,_}=CutPoint, #we{es=Etab,vp=Vtab}) ->
           false -> EdgesToCut1
         end
     end, [], Etab);
-intersects({0.0,0.0,1.0}=Plane, {_,_,Z}=CutPoint, #we{es=Etab,vp=Vtab}) ->
+intersects({+0.0,+0.0,1.0}=Plane, {_,_,Z}=CutPoint, #we{es=Etab,vp=Vtab}) ->
     array:sparse_foldl(fun
       (Edge, #edge{vs=Va,ve=Vb}, EdgesToCut1) ->
         {_,_,Za} = PosA = array:get(Va, Vtab),
         {_,_,Zb} = PosB = array:get(Vb, Vtab),
-        case oposite_sides(Za, Zb, Z) of
+        case opposite_sides(Za, Zb, Z) of
           true ->
             EdgeVec = e3d_vec:norm_sub(PosA, PosB),
              case abs(e3d_vec:dot(Plane, EdgeVec)) < ?NON_ZERO of
@@ -464,7 +464,7 @@ intersects(Plane, CutPoint, #we{es=Etab,vp=Vtab}) ->
       (Edge, #edge{vs=Va,ve=Vb}, EdgesToCut1) ->
         {SideA,PosA} = array:get(Va, SideArray),
         {SideB,PosB} = array:get(Vb, SideArray),
-        case oposite_sides(SideA, SideB) of
+        case opposite_sides(SideA, SideB) of
           true ->
             EdgeVec = e3d_vec:norm_sub(PosA, PosB),
              case abs(e3d_vec:dot(Plane, EdgeVec)) < ?NON_ZERO of
@@ -481,13 +481,13 @@ intersects(Plane, CutPoint, #we{es=Etab,vp=Vtab}) ->
 %%% Face mode
 %%%
 
-intersects(Faces, {1.0,0.0,0.0}=Plane, {X,_,_}=CutPoint, #we{es=Etab,vp=Vtab}=We0) ->
+intersects(Faces, {1.0,+0.0,+0.0}=Plane, {X,_,_}=CutPoint, #we{es=Etab,vp=Vtab}=We0) ->
     Edges = wings_face:to_edges(Faces, We0),
     EdgePos2Cut = foldl(fun(Edge, EdgesToCut1) ->
         #edge{vs=Va,ve=Vb} = array:get(Edge, Etab),
         {Xa,_,_} = PosA = array:get(Va, Vtab),
         {Xb,_,_} = PosB = array:get(Vb, Vtab),
-        case oposite_sides(Xa, Xb, X) of
+        case opposite_sides(Xa, Xb, X) of
           true ->
             EdgeVec = e3d_vec:norm_sub(PosA, PosB),
              case abs(e3d_vec:dot(Plane, EdgeVec)) < ?NON_ZERO of
@@ -500,13 +500,13 @@ intersects(Faces, {1.0,0.0,0.0}=Plane, {X,_,_}=CutPoint, #we{es=Etab,vp=Vtab}=We
         end
     end, [], Edges),
     cut_intersecting_edges(Faces, Plane, EdgePos2Cut, We0);
-intersects(Faces, {0.0,1.0,0.0}=Plane, {_,Y,_}=CutPoint, #we{es=Etab,vp=Vtab}=We0) ->
+intersects(Faces, {+0.0,1.0,+0.0}=Plane, {_,Y,_}=CutPoint, #we{es=Etab,vp=Vtab}=We0) ->
     Edges = wings_face:to_edges(Faces, We0),
     EdgePos2Cut = foldl(fun(Edge, EdgesToCut1) ->
         #edge{vs=Va,ve=Vb} = array:get(Edge, Etab),
         {_,Ya,_} = PosA = array:get(Va, Vtab),
         {_,Yb,_} = PosB = array:get(Vb, Vtab),
-        case oposite_sides(Ya, Yb, Y) of
+        case opposite_sides(Ya, Yb, Y) of
           true ->
             EdgeVec = e3d_vec:norm_sub(PosA, PosB),
              case abs(e3d_vec:dot(Plane, EdgeVec)) < ?NON_ZERO of
@@ -519,13 +519,13 @@ intersects(Faces, {0.0,1.0,0.0}=Plane, {_,Y,_}=CutPoint, #we{es=Etab,vp=Vtab}=We
         end
     end, [], Edges),
     cut_intersecting_edges(Faces, Plane, EdgePos2Cut, We0);
-intersects(Faces, {0.0,0.0,1.0}=Plane, {_,_,Z}=CutPoint, #we{es=Etab,vp=Vtab}=We0) ->
+intersects(Faces, {+0.0,+0.0,1.0}=Plane, {_,_,Z}=CutPoint, #we{es=Etab,vp=Vtab}=We0) ->
     Edges = wings_face:to_edges(Faces, We0),
     EdgePos2Cut = foldl(fun(Edge, EdgesToCut1) ->
         #edge{vs=Va,ve=Vb} = array:get(Edge, Etab),
         {_,_,Za} = PosA = array:get(Va, Vtab),
         {_,_,Zb} = PosB = array:get(Vb, Vtab),
-        case oposite_sides(Za, Zb, Z) of
+        case opposite_sides(Za, Zb, Z) of
           true ->
             EdgeVec = e3d_vec:norm_sub(PosA, PosB),
              case abs(e3d_vec:dot(Plane, EdgeVec)) < ?NON_ZERO of
@@ -544,7 +544,7 @@ intersects(Faces, Plane, CutPoint, #we{es=Etab,vp=Vtab}=We0) ->
         #edge{vs=Va,ve=Vb} = array:get(Edge, Etab),
         PosA = array:get(Va, Vtab),
         PosB = array:get(Vb, Vtab),
-        case oposite_sides(PosA, PosB, CutPoint, Plane) of
+        case opposite_sides(PosA, PosB, CutPoint, Plane) of
           true ->
             EdgeVec = e3d_vec:norm_sub(PosA, PosB),
              case abs(e3d_vec:dot(Plane, EdgeVec)) < ?NON_ZERO of
@@ -649,7 +649,7 @@ cut_edges(Es, We0) ->
 intersect_vec_plane(PosA, PosB, Plane, EdgeVec) ->
 %% Return point where Vector through PosA intersects with plane at PosB
     case e3d_vec:dot(EdgeVec,Plane) of
-      0.0 ->
+      Dot when abs(Dot) < ?EPSILON ->
         Intersection = e3d_vec:dot(e3d_vec:sub(PosB, PosA), Plane),
         e3d_vec:add(PosB, e3d_vec:mul(Plane, Intersection));
       Dot ->
@@ -660,18 +660,18 @@ intersect_vec_plane(PosA, PosB, Plane, EdgeVec) ->
 %% Tests whether the 2 vertices of an edge are on opposite sides of the Plane.
 %% The opposite_sides function that is used depends on the Plane and the
 %% selection mode.
-oposite_sides(A, B) when A =:= on_vertex; B =:= on_vertex -> true;
-oposite_sides(Side, Side) -> false;
-oposite_sides(_, _) -> true.
+opposite_sides(A, B) when A =:= on_vertex; B =:= on_vertex -> true;
+opposite_sides(Side, Side) -> false;
+opposite_sides(_, _) -> true.
 
-oposite_sides(_, B, B) -> true;
-oposite_sides(A, _, A) -> true;
-oposite_sides(A, B, C) ->
+opposite_sides(_, B, B) -> true;
+opposite_sides(A, _, A) -> true;
+opposite_sides(A, B, C) ->
     SideA = A < C,
     SideB = B < C,
     SideA =/= SideB.
 
-oposite_sides(PosA, PosB, CutPoint, Plane) ->
+opposite_sides(PosA, PosB, CutPoint, Plane) ->
     VecA = e3d_vec:norm_sub(PosA, CutPoint),
     VecB = e3d_vec:norm_sub(PosB, CutPoint),
     Zero = e3d_vec:zero(),

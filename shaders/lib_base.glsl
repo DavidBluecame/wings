@@ -13,7 +13,7 @@
 #extension GL_ARB_shader_texture_lod : enable
 #endif
 
-const float M_PI = 3.141592653589793;
+const float M_PI = 3.14159265359;
 
 // Encapsulate the various inputs used by the various functions in the shading equation
 struct PBRInfo
@@ -41,14 +41,14 @@ vec4 SRGBtoLINEAR(vec4 srgbIn)
     return vec4(linOut,srgbIn.w);
 }
 
-PBRInfo calc_views(vec3 Norm, vec3 View, vec3 Ligth)
+PBRInfo calc_views(vec3 Norm, vec3 View, vec3 Light)
 {
   PBRInfo pbr;
-  vec3 Half = normalize(Ligth+View);           // halfv between l and v
-  pbr.NdotL = clamp(dot(Norm, Ligth), 0.001, 1.0);
+  vec3 Half = normalize(Light+View);           // halfv between l and v
+  pbr.NdotL = clamp(dot(Norm, Light), 0.001, 1.0);
   pbr.NdotV = abs(dot(Norm, View)) + 0.001;
   pbr.NdotH = clamp(dot(Norm, Half), 0.0, 1.0);
-  pbr.LdotH = clamp(dot(Ligth, Half), 0.0, 1.0);
+  pbr.LdotH = clamp(dot(Light, Half), 0.0, 1.0);
   pbr.VdotH = clamp(dot(View, Half), 0.0, 1.0);
   return pbr;
 }

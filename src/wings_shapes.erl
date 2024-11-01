@@ -15,7 +15,7 @@
 -module(wings_shapes).
 -export([menu/2,command/2]).
 -export([transform_obj_dlg/0, transform_obj/4, transform_obj/2]).
--export([tri_sphere/1]).
+-export([tri_sphere/1, tri_cube/1, tri_disc/1]).
 -include("wings.hrl").
 
 -import(lists, [map/2,seq/2,seq/3]).
@@ -300,8 +300,8 @@ sphere(Ask, St) when is_atom(Ask) ->
     Q = [{label_column, [
 	    {?STR(sphere,1,"Sections"), {text,16,[{range,{3,infinity}}]}},
 	    {?STR(sphere,2,"Slices"), {text,8,[{range,{3,infinity}}]}},
-	    {?STR(sphere,3,"X Radial"), {text,2.0,[{range,{0.0,infinity}}]}},
-	    {?STR(sphere,4,"Y Radial"), {text,2.0,[{range,{0.0,infinity}}]}}
+	    {?STR(sphere,3,"X Radius"), {text,2.0,[{range,{0.0,infinity}}]}},
+	    {?STR(sphere,4,"Y Radius"), {text,2.0,[{range,{0.0,infinity}}]}}
     	 ]},
 	 transform_obj_dlg()],
     ask(sphere, Ask, Q, St);
@@ -392,7 +392,7 @@ transform_obj_dlg() ->
 
 transform_obj([{_,Rot_X},{_,Rot_Y},{_,Rot_Z},{_,Mov_X},{_,Mov_Y},{_,Mov_Z},{_,Ground}], Vs) ->
     transform_obj({Rot_X,Rot_Y,Rot_Z}, {Mov_X,Mov_Y,Mov_Z}, Ground, Vs).
-transform_obj({0.0,0.0,0.0},{0.0,0.0,0.0},false, Vs) -> Vs;
+transform_obj({+0.0,+0.0,+0.0},{+0.0,+0.0,+0.0},false, Vs) -> Vs;
 transform_obj({Rot_X,Rot_Y,Rot_Z}, {Mov_X,Mov_Y,Mov_Z}, Ground, Vs) ->
     MrX = e3d_mat:rotate(Rot_X, {1.0,0.0,0.0}),
     MrY = e3d_mat:rotate(Rot_Y, {0.0,1.0,0.0}),
@@ -410,14 +410,67 @@ transform_obj({Rot_X,Rot_Y,Rot_Z}, {Mov_X,Mov_Y,Mov_Z}, Ground, Vs) ->
 
 
 %%% Other shapes for internal rendering
+%% Replaces glu quadric functionality
+%% Returns the number of triangles and the triangles in a list
+%% or in a binary if option binary is true.
+%% Extra contents depends on Options.
+%% Options:
+%%     subd    Subdivision level default 1
+%%     binary  All output is binary default false
+%%     ccw     Winding order counter clockwise default true
+%%     scale   Scale output default 1,
+%%     normals Add normals to the default false
+%%     tgs     Add tangent-normals to the extra list default false
 
--define(XPLUS, {1.0,0.0,0.0}).
--define(XMIN, {-1.0,0.0,0.0}).
--define(YPLUS, {0.0,1.0,0.0}).
--define(YMIN, {0.0,-1.0,0.0}).
--define(ZPLUS, {0.0,0.0,1.0}).
--define(ZMIN, {0.0,0.0,-1.0}).
+-type out() :: binary() | list().
 
+-define(LLF, {-1.0, -1.0,  1.0}).  %% Lower left front
+-define(LLB, {-1.0, -1.0, -1.0}).  %% Lower left back
+-define(LRF, { 1.0, -1.0,  1.0}).  %% Lower Right front
+-define(LRB, { 1.0, -1.0, -1.0}).
+-define(ULF, {-1.0,  1.0,  1.0}).  %% Upper Left Front
+-define(ULB, {-1.0,  1.0, -1.0}).
+-define(URF, { 1.0,  1.0,  1.0}).
+-define(URB, { 1.0,  1.0, -1.0}).
+
+%%           +Y
+%%      ULB  _____ URB
+%%         /| -Z /|
+%%   ULF  /_____/ URF
+%% -X LLB|->|__ |_| LRB   +X
+%%       | /    | /
+%%   LLF |/_____|/ LRF
+%%         +Z
+-define(cube,
+	[{?LLF, ?LRF, ?URF}, {?URF,  ?ULF, ?LLF},  % Front
+         {?LRB, ?LLB, ?ULB}, {?ULB,  ?URB, ?LRB},  % Back
+         {?ULF, ?URF, ?URB}, {?URB,  ?ULB, ?ULF},  % Top
+         {?LLB, ?LRB, ?LRF}, {?LRF,  ?LLF, ?LLB},  % Bottom
+         {?LLB, ?LLF, ?ULF}, {?ULF,  ?ULB, ?LLB},  % Left
+         {?LRF, ?LRB, ?URB}, {?URB,  ?URF, ?LRF}   % Right
+        ]).
+
+-spec tri_cube(Opts::map()) ->
+          #{size=>NoOfFs::integer(), tris := Tris::out(), ns => Normals::out(), uvs := UVs::out(), tgs := Tgs::out()}.
+tri_cube(Opts) ->
+    Binary = maps:get(binary, Opts, false),
+    CCW    = maps:get(ccw, Opts, true),
+    Scale  = maps:get(scale, Opts, 1),
+    (maps:get(subd, Opts, 1) > 1) andalso error(not_yet_implented),
+    maps:get(normals, Opts, false) andalso error(not_yet_implented),
+    maps:get(uvs, Opts, false) andalso error(not_yet_implented),
+    maps:get(tgs, Opts, false) andalso error(not_yet_implented),
+
+    Tris = ?cube,
+    convert(Binary, Tris, CCW, Scale, false, false, false).
+
+-define(XPLUS, {1.0,+0.0,+0.0}).
+-define(XMIN, {-1.0,+0.0,+0.0}).
+-define(YPLUS, {+0.0,1.0,+0.0}).
+-define(YMIN, {+0.0,-1.0,+0.0}).
+-define(ZPLUS, {+0.0,+0.0,1.0}).
+-define(ZMIN, {+0.0,+0.0,-1.0}).
+-define(ZERO, {+0.0,+0.0,+0.0}).
 -define(octahedron,
 	[{?ZPLUS, ?XPLUS, ?YPLUS},
 	 {?XMIN,  ?ZPLUS, ?YPLUS},
@@ -428,18 +481,8 @@ transform_obj({Rot_X,Rot_Y,Rot_Z}, {Mov_X,Mov_Y,Mov_Z}, Ground, Vs) ->
 	 {?YMIN,  ?XMIN,  ?ZMIN },
 	 {?XPLUS, ?YMIN,  ?ZMIN }]).
 
-%% func tri_sphere(Options) -> {Size::integer(), Tris::term(), [Extra]}
-%% Replaces glu:quadric
-%% Returns the number of triangles and the triangles in a list
-%% or in a binary if option binary is true.
-%% Extra contents depends on Options.
-%% Options:
-%%     subd    Subdivision level default 1
-%%     binary  All output is binary default false
-%%     ccw     Winding order counter clockwise default true
-%%     scale   Scale output default 1,
-%%     normals Add normals to the extra list default false
-%%     Extra = [NormalsIfIncluded]
+-spec tri_sphere(Opts :: map()) ->
+          #{size := integer(), tris := out(), ns := out(), uvs := out(), tgs := out()}.
 tri_sphere(Opts) when is_map(Opts) ->
     Subd   = maps:get(subd, Opts, 1),
     Binary = maps:get(binary, Opts, false),
@@ -449,40 +492,32 @@ tri_sphere(Opts) when is_map(Opts) ->
     UV     = maps:get(uvs, Opts, false),
     Tg     = maps:get(tgs, Opts, false),
     %% Do the work
-    Tris   = subd_tris(1, Subd, ?octahedron),
-    case Binary of
-	true ->
-	    BinTris = list_to_bin(Tris, CCW, Scale),
-	    Ns = if not Normal -> [];
-		    Scale =:= 1 -> [BinTris];
-		    true -> [list_to_bin(Tris, CCW, 1)]
-		 end,
-	    UVs = if not UV -> [];
-		      true -> list_to_bin(prepare_uvs(Tris), CCW, 1)
-		  end,
-	    Tgs = if not Tg -> [];
-		      true -> list_to_bin(prepare_tgs(Tris), CCW, 1)
-		  end,
-	    {size(BinTris) div (9*4), BinTris, Ns, UVs, Tgs};
-	false ->
-	    Scaled = convert_list(Tris, CCW, Scale),
-	    Ns = if not Normal -> [];
-		    Scale =:= 1 -> Scaled;
-		    true -> convert_list(Tris, CCW, 1)
-		 end,
-	    UVs = if not UV -> [];
-		      true -> convert_list(prepare_uvs(Tris), CCW, 1)
-		  end,
-	    Tgs = if not Tg -> [];
-		      true -> convert_list(prepare_tgs(Tris), CCW, 1)
-		  end,
-	    {length(Tris), Scaled, Ns, UVs, Tgs}
-    end.
+    Tris   = subd_sphere(1, Subd, ?octahedron),
+    convert(Binary, Tris, CCW, Scale, Normal, UV, Tg).
 
-subd_tris(Level, MaxLevel, Sphere0) when Level < MaxLevel ->
-    Sphere = subd_tris(Sphere0, []),
-    subd_tris(Level+1, MaxLevel, Sphere);
-subd_tris(_,_, Sphere) -> Sphere.
+-define(diamond,
+        [{?ZERO, ?YPLUS, ?XMIN},
+         {?ZERO, ?XMIN, ?YMIN},
+         {?ZERO, ?YMIN, ?XPLUS},
+         {?ZERO, ?XPLUS, ?YPLUS}]).
+-spec tri_disc(Opts :: map()) ->
+          #{size := integer(), tris := out(), ns := out(), uvs := out(), tgs := out()}.
+tri_disc(Opts) ->
+    Binary = maps:get(binary, Opts, false),
+    CCW    = maps:get(ccw, Opts, true),
+    Scale  = maps:get(scale, Opts, 1),
+    Subd   = maps:get(subd, Opts, 1),
+
+    maps:get(normals, Opts, false) andalso error(not_yet_implented),
+    maps:get(uvs, Opts, false) andalso error(not_yet_implented),
+    maps:get(tgs, Opts, false) andalso error(not_yet_implented),
+    Tris = subd_disc(1, Subd, ?diamond),
+    convert(Binary, Tris, CCW, Scale, false, false, false).
+
+subd_sphere(Level, MaxLevel, Sphere0) when Level < MaxLevel ->
+    Sphere = subd_sphere(Sphere0, []),
+    subd_sphere(Level+1, MaxLevel, Sphere);
+subd_sphere(_,_, Sphere) -> Sphere.
 
 %%	  2             create a, b, c in the middle
 %%	 /\		Normalize a, b, c
@@ -494,7 +529,7 @@ subd_tris(_,_, Sphere) -> Sphere.
 %% 0	  a	1	    [b,1,c]
 %%
 
-subd_tris([{V0,V1,V2}|Rest], Acc) ->
+subd_sphere([{V0,V1,V2}|Rest], Acc) ->
     A = e3d_vec:norm(midpoint(V0,V1)),
     B = e3d_vec:norm(midpoint(V1,V2)),
     C = e3d_vec:norm(midpoint(V0,V2)),
@@ -502,17 +537,57 @@ subd_tris([{V0,V1,V2}|Rest], Acc) ->
     T2 = {A,B,C},
     T3 = {A,V1,B},
     T4 = {C,B,V2},
-    subd_tris(Rest, [T1,T2,T3,T4|Acc]);
-subd_tris([],Acc) ->
+    subd_sphere(Rest, [T1,T2,T3,T4|Acc]);
+subd_sphere([],Acc) ->
     Acc.
 
 midpoint({X1,Y1,Z1}, {X2,Y2,Z2}) ->
     {(X1+X2)*0.5, (Y1+Y2)*0.5, (Z1+Z2)*0.5}.
 
+
+subd_disc(Level, Max, Tris0) when Level < Max ->
+    subd_disc(Level+1, Max, subd_disc(Tris0, []));
+subd_disc(_, _, Tris) ->
+    Tris.
+
+subd_disc([{C,V1,V2}|Rest], Acc) ->
+    M = e3d_vec:norm(midpoint(V1,V2)),
+    subd_disc(Rest, [{C,V1,M}, {C,M,V2}|Acc]);
+subd_disc([], Acc) ->
+    Acc.
+
+convert(true, Tris, CCW, Scale, Normal, UV, Tg) ->
+    BinTris = list_to_bin(Tris, CCW, Scale),
+    Ns = if not Normal -> <<>>;
+            Scale =:= 1 -> [BinTris];
+            true -> [list_to_bin(Tris, CCW, 1)]
+         end,
+    UVs = if not UV -> <<>>;
+             true -> list_to_bin(prepare_uvs(Tris), CCW, 1)
+          end,
+    Tgs = if not Tg -> <<>>;
+             true -> list_to_bin(prepare_tgs(Tris), CCW, 1)
+          end,
+    #{size => size(BinTris) div (9*4), tris => BinTris, ns => Ns, uvs => UVs, tgs => Tgs};
+convert(false, Tris, CCW, Scale, Normal, UV, Tg) ->
+    Scaled = convert_list(Tris, CCW, Scale),
+    Ns = if not Normal -> [];
+            Scale =:= 1 -> Scaled;
+            true -> convert_list(Tris, CCW, 1)
+         end,
+    UVs = if not UV -> [];
+             true -> convert_list(prepare_uvs(Tris), CCW, 1)
+          end,
+    Tgs = if not Tg -> [];
+             true -> convert_list(prepare_tgs(Tris), CCW, 1)
+          end,
+    #{size => length(Tris), tris => Scaled, ns => Ns, uvs => UVs, tgs => Tgs}.
+
+
 %%%%%%%%%%%%%% Compute tangents for tri_sphere %%%%%%%%%%%
 prepare_tgs(Tris) ->
     lists:foldr(fun({A,B,C}, Acc) ->
-		    [{calc_tg(A),calc_tg(B),calc_tg(C)}|Acc]
+                        [{calc_tg(A),calc_tg(B),calc_tg(C)}|Acc]
 		end, [], Tris).
 
 calc_tg(?YPLUS) -> {0.0,0.0,-1.0,-1.0};
@@ -528,16 +603,16 @@ calc_tg(N) ->
 %%%%%%%%%%%%%% Compute the UVs for tri_sphere %%%%%%%%%%%
 prepare_uvs(Tris) ->
     lists:foldr(fun({A,B,C}, Acc) ->
-		    {UA1,VA} = calc_uv(A),
-		    {UB1,VB} = calc_uv(B),
-		    {UC1,VC} = calc_uv(C),
-		    UA0 = close_uv_loop(UA1,UB1,UC1),
-		    UB0 = close_uv_loop(UB1,UC1,UA1),
-		    UC0 = close_uv_loop(UC1,UA1,UB1),
-		    UA = fix_top_issue(A, UA0, UB0, UC0),
-		    UB = fix_top_issue(B, UB0, UC0, UA0),
-		    UC = fix_top_issue(C, UC0, UA0, UB0),
-		    [{{UA,VA},{UB,VB},{UC,VC}}|Acc]
+                        {UA1,VA} = calc_uv(A),
+                        {UB1,VB} = calc_uv(B),
+                        {UC1,VC} = calc_uv(C),
+                        UA0 = close_uv_loop(UA1,UB1,UC1),
+                        UB0 = close_uv_loop(UB1,UC1,UA1),
+                        UC0 = close_uv_loop(UC1,UA1,UB1),
+                        UA = fix_top_issue(A, UA0, UB0, UC0),
+                        UB = fix_top_issue(B, UB0, UC0, UA0),
+                        UC = fix_top_issue(C, UC0, UA0, UB0),
+                        [{{UA,VA},{UB,VB},{UC,VC}}|Acc]
 		end, [], Tris).
 
 calc_uv({X,Y,Z}) ->
@@ -557,8 +632,6 @@ list_to_bin([{{_,_},_,_}|_]=Tris, CCW, Scale) ->
 list_to_bin(Tris, CCW, Scale) ->
     << <<(X):?F32,(Y):?F32,(Z):?F32>> || Fs <- Tris, {X,Y,Z} <- conv_tuple_bin(Fs,CCW,Scale) >>.
 
-conv_tuple_bin({_,_}=Fs, CCW, _) ->
-    [V || V <- conv_tuple_list(Fs,CCW)];
 conv_tuple_bin(Fs, CCW, Size) ->
     [scale(V, Size) || V <- conv_tuple_list(Fs,CCW)].
 
@@ -567,7 +640,6 @@ convert_list(List, CCW, 1) ->
 convert_list(List, CCW, Size) ->
     [scale(V, Size) || Fs <- List, V <- conv_tuple_list(Fs,CCW)].
 
-conv_tuple_list({U,V}, _) -> [U,V];
 conv_tuple_list({V1,V2,V3}, true) -> [V1,V2,V3];
 conv_tuple_list({V1,V2,V3}, false) -> [V1,V3,V2].
 

@@ -144,7 +144,7 @@ menu_string1(Mode,Type) ->
           Str = ?__(3,"Calculate the angle between any two ~s and save the result as a rotation constraint in the Preferences"),
           wings_util:format(Str,[PMdeStr]);
       {Mode,sub_angle} ->
-          ?__(4,"Calculate the differnce between two angles and save the result as a rotation constraint in the Preferences");
+          ?__(4,"Calculate the difference between two angles and save the result as a rotation constraint in the Preferences");
       {Mode,to_axis} ->
           Str = ?__(5,"Measure the angle between a single ~s and a standard axis or defined vector. Save the result as a rotation constraint in the Preferences"),
           wings_util:format(Str,[SMdeStr]);
@@ -202,13 +202,13 @@ menu_string3(advanced,Mode,Type,Axis1,Axis2) ->
 
       {Mode,average,none,normal} ->
           ?__(1,"Measure the selected edges along their normals")++
-          ?__(22," and then caluculate their average length");
+          ?__(22," and then calculate their average length");
       {Mode,average,none,'ASK'} ->
           ?__(2,"Pick an axis along which to measure the selected edges")++
-          ?__(22," and then caluculate their average length");
+          ?__(22," and then calculate their average length");
       {Mode,average,none,Axis2} ->
           Str = ?__(3,"Measure the selected edges only along the ~s axis"),
-          wings_util:format(Str,[Axs2Str])++?__(22," and then caluculate their average length");
+          wings_util:format(Str,[Axs2Str])++?__(22," and then calculate their average length");
 
       {Mode,angle,none,normal} ->
           ?__(4,"Measure the selected angle");
@@ -515,9 +515,9 @@ check_selection(sub_angle,none,none,#st{sel=[{_Id0,Sel0},{_Id1,Sel1}]}=St,OrigSt
         OrigA = measure_angle(normal,OrigSt),
         Angle = measure_angle(normal,St),
         A0 = abs(Angle - OrigA),
-        A1 = case A0 of
-               0.0 -> 180.0;
-               _ -> A0
+        A1 = case A0 < ?EPSILON of
+                 true -> 180.0;
+                 false -> A0
              end,
         Str = [?__(11," Original Angle ~s"),?DEGREE,?__(12,"\n Current Angle ~s"),
                ?DEGREE,?__(13,"\n Difference ~s"),?DEGREE],
@@ -534,9 +534,9 @@ check_selection(sub_angle,none,none,#st{sel=[{_Id,Sel}]}=St,OrigSt) ->
         OrigA = wings_util:nice_float(Angle),
         CurrA = wings_util:nice_float(CAngle),
         A0 = abs(Angle - CAngle),
-        A1 = case A0 of
-               0.0 -> 180.0;
-               _ -> A0
+        A1 = case A0 < ?EPSILON of
+                 true -> 180.0;
+                 false -> A0
              end,
         A2 = wings_util:nice_float(A1),
         Str1 = [wings_util:format(?__(16," Angle ~s"),[OrigA]),?DEGREE],

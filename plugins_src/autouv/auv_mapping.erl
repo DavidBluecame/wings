@@ -67,10 +67,10 @@ map_chart(Type, We, Options) ->
 	_ when Type == lsqcm, is_list(Options), length(Options) < 2 ->
 	    {error,?__(3,"At least 2 vertices (per chart) must be selected")};
 	[Best|_] ->
-	    map_chart_1(Type, Faces, Best, Options, We);	
+	    map_chart_1(Type, Faces, Best, Options, We);
 	Err ->
-	    io:format(?__(4,"Error:")++" ~p~n", [Err]),
-	    {error, ?__(5,"Internal Error")}
+	    ?dbg(?__(4,"Error:")++" ~p~n", [Err]),
+	    {error, ?__(5,"Error, try to cleanup objects before uv-mapping")}
     end.
 
 map_chart_1(Type, Chart, Loop, Options, We) ->
@@ -80,8 +80,8 @@ map_chart_1(Type, Chart, Loop, Options, We) ->
 	throw:What ->
 	    {error,lists:flatten(What)};
 	_:Reason:ST ->
-	    Msg = io_lib:format(?__(2,"Internal error:")++" ~P", [Reason,10]),
-	    io:format("~p:~p "++?__(3,"Error")++" ~p~n  ~p ~n",
+	    Msg = ?__(2,"Error: try to cleanup objects before uv-mapping"),
+	    ?dbg("~p:~p "++?__(3,"Error")++" ~p~n  ~p ~n",
 		      [?MODULE,?LINE,Reason,ST]),
 	    {error,lists:flatten(Msg)}
     end.
@@ -140,8 +140,8 @@ projectFromChartNormal(Chart, We) ->
 projectFromCamera(Chart,{matrices,{MM,PM,VP}},We) ->
     Vs = wings_face:to_vertices(Chart, We),
     Proj = fun(V) ->
-		   {X,Y,Z} = wings_vertex:pos(V, We),
-		   {S,T, _} = wings_gl:project(X,Y,Z,MM,PM,VP),
+		   Pos = wings_vertex:pos(V, We),
+		   {S,T, _} = e3d_transform:project(Pos,MM,PM,VP),
 		   {V,{S,T,0.0}}
 	   end,
     lists:map(Proj, Vs).
@@ -169,11 +169,21 @@ lscm(Fs, none, Loop, We) ->
 lscm(Fs0, Pinned, _Loop, We0) ->
     {TriWe,TriFs,Vs,Fs,WeVs2Vs,Vs2WeVs} = init_mappings(Fs0,We0),
     {BIndx,BPos} = split_pinned(Pinned, WeVs2Vs, [], []),
-    UVs0 = libigl:lscm(Vs, Fs, BIndx, BPos),
-    UVs = remap_uvs(UVs0, Vs2WeVs),
-    OrigArea = fs_area(TriFs, TriWe, 0.0),
-    MappedArea = fs_area(TriFs, TriWe#we{vp=array:from_orddict(UVs)}, 0.0),
-    scaleVs(UVs, math:sqrt(OrigArea/MappedArea)).
+    case libigl:lscm(Vs, Fs, BIndx, BPos) of
+        false ->
+            ?dbg("Fs: ~p~n",[Fs0]),
+            ?dbg("Pinned: ~p~n",[Pinned]),
+            ?dbg("Loop: ~p~n",[_Loop]),
+            throw(?__(1, "Couldn't calculate uv-coords for chart"));
+        {error, Reason} ->
+            ?dbg("Error: ~p", [Reason]),
+            throw(?__(2, "Math error"));
+        UVs0 ->
+            UVs = remap_uvs(UVs0, Vs2WeVs),
+            OrigArea = fs_area(TriFs, TriWe, 0.0),
+            MappedArea = fs_area(TriFs, TriWe#we{vp=array:from_orddict(UVs)}, 0.0),
+            scaleVs(UVs, math:sqrt(OrigArea/MappedArea))
+    end.
 
 lsqcm(Fs, none, Loop, We) ->
     lsqcm(Fs,find_pinned(Loop,We),Loop,We);
@@ -429,7 +439,7 @@ split_pinned([], _, Indx, PosL) ->
     {reverse(Indx), reverse(PosL)}.
 
 scaleVs(VUVs,Scale) ->
-    [{Id, {X*Scale,Y*Scale,0.0}} || {Id,{X,Y,0.0}} <- VUVs].
+    [{Id, {X*Scale,Y*Scale,0.0}} || {Id,{X,Y,_}} <- VUVs].
 
 find_pinned({Circumference, BorderEdges}, We) ->
     Vs = [array:get(V1, We#we.vp) || #be{vs=V1} <- BorderEdges],
@@ -479,7 +489,7 @@ chart_normal(Fs,We = #we{es=Etab}) ->
     CalcNormal = fun(Face,Area) -> face_normal(Face,Area,We) end,
     N0 = foldl(CalcNormal, e3d_vec:zero(), Fs),
     case e3d_vec:norm(N0) of
-	{0.0,0.0,0.0} -> %% Bad normal Fallback1
+	{+0.0,+0.0,+0.0} -> %% Bad normal Fallback1
 	    %%	    BE = auv_util:outer_edges(Fs,We,false),
 	    [{_,BE}|_] = auv_placement:group_edge_loops(Fs,We),
 	    EdgeNormals = 
@@ -490,7 +500,7 @@ chart_normal(Fs,We = #we{es=Etab}) ->
 		end,
 	    N1 = foldl(EdgeNormals, e3d_vec:zero(), BE),
 	    case e3d_vec:norm(N1) of
-		{0.0,0.0,0.0} -> %% Bad normal Fallback2
+		{+0.0,+0.0,+0.0} -> %% Bad normal Fallback2
 		    NewFs = decrease_chart(Fs,BE),
 		    chart_normal(NewFs, We);
 		N -> e3d_vec:neg(N)
@@ -569,7 +579,7 @@ lsq_setup(Fs,We,Pinned) ->
     {Mfp1c,Mfp2c,Mfp2nc,LuLv} = build_cols(M1,M2,M2n,Lquv),
     ?DBG("lsq_int - LuLv = ~p~n", [LuLv]),
     %% Compose the matrix and vector to solve
-    %% for a Least SQares solution.
+    %% for a Least Squares solution.
     {Af,Ap} = build_matrixes(N,Mfp1c,Mfp2c,Mfp2nc),
     ?DBG("Solving matrices~n", []),
     X0Fix = auv_matrix:vector(lists:duplicate(M-Np, Usum/Np)++
@@ -593,11 +603,11 @@ lsq_init_fs([F|Fs],P,We = #we{vp=Vtab},Ds0,N,Re0,Im0) ->
 		    array:get(C0,Vtab)), 
     %% Raimos old solution. 
     SqrtDT0 = try math:sqrt(abs((X2-X1)*(Y3-Y1)-(Y2-Y1)*(X3-X1)))
-	     catch _:_ -> 0.000001
-	     end,
-    SqrtDT = if SqrtDT0 =:= 0.0 -> 1.0;  % this can happen e.g. in a bevel/extrude without offset
-        true -> SqrtDT0
-    end,
+              catch _:_ -> 0.000001
+              end,
+    SqrtDT = if SqrtDT0 < ?EPSILON -> 1.0;  % this can happen e.g. in a bevel/extrude without offset
+                true -> SqrtDT0
+             end,
     W1re = X3-X2, W1im = Y3-Y2, 
     W2re = X1-X3, W2im = Y1-Y3, 
     W3re = X2-X1, W3im = Y2-Y1,
@@ -1182,7 +1192,7 @@ calc_scale([{Face,[{Id1,P1},{Id2,P2},{Id3,P3}]}|R], Ovs, A2D, A3D,F2A,F2OVs) ->
     A3 = area3d(Q1,Q2,Q3),
     calc_scale(R,Ovs,A2+A2D,A3+A3D,[{Face,A3}|F2A],[{Face,{Q1,Q2,Q3}}|F2OVs]);
 calc_scale([],_Ovs,A2D,A3D,F2A,F2OVs) ->
-    {math:sqrt(A3D/A2D), 
+    {math:sqrt(A3D/wings_util:nonzero(A2D)),
      gb_trees:from_orddict(lists:sort(F2A)), 
      gb_trees:from_orddict(lists:sort(F2OVs))}.
 
@@ -1216,7 +1226,7 @@ l2({S1,T1}, {S2,T2}, {S3,T3},
     T23 = T2-T3,    T31 = T3-T1,    T12 = T1-T2,
     S32 = S3-S2,    S13 = S1-S3,    S21 = S2-S1,
     case S21*T31-S13*T12 of
-	DoubleArea when DoubleArea > 0.00000001 ->
+	DoubleArea when DoubleArea > ?EPSILON ->
 	    SX = Q1x*T23+Q2x*T31+Q3x*T12,
 	    SY = Q1y*T23+Q2y*T31+Q3y*T12,
 	    SZ = Q1z*T23+Q2z*T31+Q3z*T12,
@@ -1234,7 +1244,7 @@ l2({S1,T1}, {S2,T2}, {S3,T3},
 
 l8(P1,P2,P3,Q1,Q2,Q3) ->  %% Worst stretch value
     A2 = area2d2(P1,P2,P3),
-    if A2 > 0.00000001 ->
+    if A2 > ?EPSILON ->
 	    SS = ss(P1,P2,P3,Q1,Q2,Q3,A2),
 	    ST = st(P1,P2,P3,Q1,Q2,Q3,A2),
 	    A = e3d_vec:dot(SS,SS),

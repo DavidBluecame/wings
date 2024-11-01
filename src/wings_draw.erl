@@ -117,7 +117,7 @@ prepare_fun_2(#dlo{proxy=IsUsed, proxy_data=Proxy,ns=Ns}=D, We, Wes) ->
     Open = wings_we:is_open(We),
     {changed_we(D, #dlo{src_we=We,open=Open,mirror=none,
 			proxy=IsUsed,
-			proxy_data=wings_proxy:invalidate(Proxy, maybe),
+			proxy_data=wings_proxy:invalidate(Proxy, 'maybe'),
 			ns=Ns}),Wes}.
 
 only_permissions_changed(#we{perm=P}, #we{perm=P}) -> false;
@@ -235,7 +235,7 @@ update_mirror(D) -> D.
 
 update_needed(#st{selmode=vertex}=St) ->
     case wings_pref:get_value(vertex_size) of
-	0.0 ->
+	+0.0 ->
 	    update_needed_1([], St);
 	PointSize->
 	    update_needed_1([{vertex,PointSize}], St)
@@ -683,7 +683,7 @@ split_new_normals(Ftab, #dlo{ns=Ns0,src_we=We}=D) ->
 
 split_new_normals([{Face,Edge}|T], We, none) ->
     %% No normals means that a new object was created in an
-    %% interative command (Shell Extrude).
+    %% interactive command (Shell Extrude).
     Ps = wings_face:vertex_positions(Face, Edge, We),
     Ns = array:set(Face, face_ns_data(Ps), array:new()),
     split_new_normals(T, We, Ns);
@@ -709,7 +709,7 @@ insert_vtx_data([], _, Acc) -> reverse(Acc).
 
 split_vs_dlist(Vs, StaticVs, {vertex,SelVs0}, #we{vp=Vtab}=We) ->
     case wings_pref:get_value(vertex_size) of
-	0.0 -> {none,none};
+	+0.0 -> {none,none};
 	_PtSize -> 
 	    DynVs = sofs:from_external(lists:merge(Vs, StaticVs), [vertex]),
 	    SelVs = sofs:from_external(gb_sets:to_list(SelVs0), [vertex]),

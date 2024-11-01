@@ -166,7 +166,12 @@ command(orthogonal_view, St) ->
     St;
 command(Option={show,What}, St) ->
     Prev = toggle_option(Option),
+    Keep = [show_groundplane, show_axes, show_info_text, show_cam_imageplane,
+            show_bb, show_bb_center, clip_plane],
+    KeepDls = lists:member(What, Keep),
     if
+        KeepDls ->
+            ignore;
 	What =:= show_normals ->
 	    Prev andalso wings_dl:map(fun(D, _) -> D#dlo{normals=none} end, []);
 	What =:= filter_texture ->
@@ -327,7 +332,7 @@ sel_mirror_objects(St) ->
 
 
 -define(RANGE_FOV, {1.0,179.9}).
--define(RANGE_NEAR_CLIP, {0.01,1000.0}).
+-define(RANGE_NEAR_CLIP, {0.001,1000.0}).
 -define(RANGE_FAR_CLIP, {100.0,infinity}).
 -define(RANGE_ZOOM_SLIDER, {-1.0,4.0}).
 -define(RANGE_NEGATIVE_SIZE, {1,infinity}).
@@ -639,12 +644,12 @@ pget(Key, Props) -> proplists:get_value(Key, Props).
 	 delay, 				%Current delay.
 	 st,					%St record.
          start=erlang:monotonic_time(),
-         frames=-1
+         frames=0
 	 }).
 
 auto_rotate(St) ->
     auto_rotate_help(),
-    Delay = 15,
+    Delay = 0, %% Render as fast as possible and sync with gl:finish()
     ?SET(auto_rotate, max(1/120, wings_pref:get_value(auto_rotate_angle)/60)),
     Active = wings_wm:this(),
     {W,H} = wings_wm:win_size(Active),
@@ -673,8 +678,9 @@ auto_rotate_event(Event, #tim{st=St, timer=Timer}=Tim) ->
     end.
 
 auto_rotate_event_1(redraw, Tim) ->
-    wings_io:batch(fun() -> auto_rotate_redraw(Tim),
-                            wxWindow:getSize(?GET(top_frame))
+    wings_io:batch(fun() ->
+                           gl:finish(), %% Sync all prev commands
+                           auto_rotate_redraw(Tim)
                    end),
     keep;
 auto_rotate_event_1(#mousemotion{}, _) -> keep;
@@ -1096,7 +1102,7 @@ views_save_dialog(Ask, Options) ->
 			fun(Opts) -> {view,{views,{save,Opts}}} end).
 
 views_rename_qs([Legend]) ->
-    [{hframe,[{label,?__(1,"Name")},{text,Legend}]}].
+    [{hframe,[{label,?__(1,"Name")},{text,Legend,[{width,22}]}]}].
 
 views_jump(J, St, CurrentView, Views) ->
     S = tuple_size(Views),
@@ -1144,6 +1150,7 @@ toggle_lights() ->
     end,
     Lights0 = wings_pref:get_value(number_of_lights),
     update_menu(Lights0),
+    wings_wm:send(top_frame, {menu,{view, number_of_lights, toggle_light(Lights0)}}),
     wings_pref:set_value(number_of_lights, toggle_light(Lights0)).
 
 toggle_light(Lights0) ->
@@ -1193,25 +1200,25 @@ along(Along, Az, El) ->
 
 along(Az, El) when Az =:= 90.0; Az =:= -90.0 ->
     case El of
-      0.0 -> x;
-      90.0 -> y;
-      -90.0 -> y;
-      180.0 -> x;
-      _ -> none
+        +0.0 -> x;
+        90.0 -> y;
+        -90.0 -> y;
+        180.0 -> x;
+        _ -> none
     end;
 along(Az, El) when El =:= 90.0; El =:= -90.0 ->
     case Az of
-      0.0 -> y;
-      90.0 -> x;
-      -90.0 -> x;
-      180.0 -> y;
-      _ -> none
+        +0.0 -> y;
+        90.0 -> x;
+        -90.0 -> x;
+        180.0 -> y;
+        _ -> none
     end;
-along(Az, El) when Az =:= 0.0; Az =:= 180.0 ->
+along(Az, El) when Az =:= +0.0; Az =:= 180.0 ->
     case El of
-      0.0 -> z;
-      180.0 -> z;
-      _ -> none
+        +0.0 -> z;
+        180.0 -> z;
+        _ -> none
     end;
 along(_, _) -> none.
 
@@ -1473,5 +1480,5 @@ help(title, camera_settings_fov) ->
 help(text, camera_settings_fov) ->
     [?__(2,"Sets the vertical field of view, i.e. the angle from lower to upper border seen from the camera. "),
      ?__(3,"The Lens controls sets the field of view according to other perhaps more well-known entities, at least for a photographer. The negative size is stored among the user preferences."),
-     ?__(4,"The Lens controls make the height of the picture right for the choosen lens, so if you do not have the same aspect ratio for the negative size in the Lens frame, as for the size of the Geometry window, the width will be in error."),
+     ?__(4,"The Lens controls make the height of the picture right for the chosen lens, so if you do not have the same aspect ratio for the negative size in the Lens frame, as for the size of the Geometry window, the width will be in error."),
      ?__(5,"Note: the zoom factor is relative a standard lens length of the negative diagonal, while only the negative height affects the effective lens length.")].

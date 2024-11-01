@@ -38,10 +38,13 @@ material_menu(St) ->
 
 material_fun(St) ->
     fun(help, _Ns) ->
-	    {?__(1,"Assign existing material to selection"),[],
+	    {?__(1,"Assign existing material to selection"),
+	     ?__(3,"Edit material assigned to selection"),
 	     ?__(2,"Create and assign new material")};
        (1, _Ns) ->
 	    mat_list(St);
+       (2, _Ns) ->
+	    mat_used_list(St);
        (3, _) ->
 	    {material,new};
        (_, _) -> ignore
@@ -56,6 +59,22 @@ mat_list_1([{Name,Ps}|Ms], Acc) ->
     Menu = {atom_to_list(Name),{assign,Name},[],[{color,Diff}]},
     mat_list_1(Ms, [Menu|Acc]);
 mat_list_1([], Acc) -> reverse(Acc).
+
+mat_used_list(St) ->
+    MatList =
+        wings_sel:fold(fun(Sel,We,Acc) ->
+            gb_sets:fold(fun(F,Acc0)->
+                MatName = atom_to_list(wings_facemat:face(F,We)),
+                case lists:member(MatName,Acc0) of
+                    false -> [MatName|Acc0];
+                    true -> Acc0
+                end
+            end, Acc, Sel)
+        end, [], St),
+    case length(MatList) of
+        1 -> {material,{edit,lists:nth(1,MatList)}};
+        _ -> [{MatName,{'VALUE',{material,{edit,MatName}}},[]} || MatName <- MatList]
+    end.
 
 new(_) ->
     new_1(new).
@@ -159,7 +178,7 @@ rename_2([], St) -> St.
 
 rename_qs(Ms) ->
     OldNames = [{label,M} || M <- Ms],
-    TextFields = [{text,M,[{key,list_to_atom(M)}]} || M <- Ms],
+    TextFields = [{text,M,[{key,list_to_atom(M)},{width,22}]} || M <- Ms],
     [{hframe,
       [{vframe,OldNames},
        {vframe,TextFields}]}].
@@ -477,7 +496,10 @@ apply_material_3({{tex, Type}=TexType, TexId}, Rs0) ->
             wings_shaders:set_uloc(texture_var(Type), enable(true), Rs1)
     end;
 apply_material_3({Type, Value}, Rs0)
-  when Type =:= diffuse; Type =:= emission; Type =:= metallic; Type =:= roughness ->
+  when Type =:= diffuse; Type =:= emission ->
+    wings_shaders:set_uloc(Type, wings_color:srgb_to_linear(Value), Rs0);
+apply_material_3({Type, Value}, Rs0)
+  when Type =:= metallic; Type =:= roughness ->
     wings_shaders:set_uloc(Type, Value, Rs0);
 apply_material_3({_Type,_}, Rs0) ->
     %% io:format("~p:~p: unsupported type ~p~n",[?MODULE,?LINE,_Type]),
@@ -623,7 +645,7 @@ is_mat_transparent(Mat) ->
 %%     Attr = color|uv|tangent
 %%  Return a ordered list of the type of attributes that are needed
 %%  according to the materials.
-%%  tanget requires uv since it needs the uv's to calculate tanget space
+%%  tangent requires uv since it needs the uv's to calculate tangent space
 needed_attributes(We, #st{mat=Mat}) ->
     Used = wings_facemat:used_materials(We),
     needed_attributes_1(Used, Mat, false, false, false).
@@ -712,28 +734,77 @@ edit_dialog(Name, Assign, St=#st{mat=Mtab0}, Mat0, DrawSphere) ->
               separator,
               {?__(6,"Opacity"), {slider,{text,Opacity0, [{key,opacity}|TexOpt]}}},
               {"Vertex Colors", VtxColMenu}
-             ], [{proportion,2}]}], [{proportion, 1}]},
-    Qs2 = wings_plugin:dialog({material_editor_setup,Name,Mat0}, [{"Wings 3D", Qs1}]),
-    Qs = {vframe_dialog,
-	  [{oframe, Qs2, 1, [{style, buttons}]}],
-	  [{buttons, [ok, cancel]}, {key, result}]},
+             ], [{proportion,2}]},
+            {value, Mat0, [{key,material}]}], [{proportion, 1},{title," Wings 3D "}]},
+    %% Check for plugin's material editor available and inset their information
+    %% in a dropdown list to allow users to choose their properties via a new dialog
+    Qs2 = plugin_dlg_menu(Name, wings_plugin:has_dialog(material_editor_setup)),
+    Qs = {vframe_dialog, [Qs1 | Qs2], [{buttons, [ok, cancel]}, {key, result}]},
     Ask = fun([{diffuse,Diff},
                {metallic, Met},
                {roughness, Roug},
-	       {emission,Emiss},
+               {emission,Emiss},
                {opacity,Opacity},
-	       {vertex_colors,VertexColors}|More]) ->
-		  OpenGL = [ask_prop_put(diffuse, Diff, Opacity),
-                            {metallic, Met},
-                            {roughness, Roug},
-			    ask_prop_put(emission, Emiss, Opacity),
-			    {vertex_colors,VertexColors}],
-		  Mat1 = keyreplace(opengl, 1, Mat0, {opengl,OpenGL}),
-		  {ok,Mat} =  plugin_results(Name, Mat1, More),
-		  Mtab = gb_trees:update(Name, Mat, Mtab0),
-		  maybe_assign(Assign, Name, St#st{mat=Mtab})
-	  end,
+               {vertex_colors,VertexColors},
+               {material,Mat1}|More]) ->
+              %% storing the latest Render engine as the preferred one
+              case lists:keyfind(plugin,1,More) of
+                  {plugin,{none,none}} -> wings_pref:delete_value(material_default_plugin);
+                  {plugin,Value} -> wings_pref:set_value(material_default_plugin,Value);
+                  _ -> ignore
+              end,
+              OpenGL = [ask_prop_put(diffuse, Diff, Opacity),
+                        {metallic, Met},
+                        {roughness, Roug},
+                        ask_prop_put(emission, Emiss, Opacity),
+                        {vertex_colors,VertexColors}],
+              %% Updating Wings3D's material properties only.
+              %% The plugin's material properties were set in its own dialog event.
+              Mat = keyreplace(opengl, 1, Mat1, {opengl,OpenGL}),
+              Mtab = gb_trees:update(Name, Mat, Mtab0),
+              maybe_assign(Assign, Name, St#st{mat=Mtab})
+          end,
     {dialog,Qs,Ask}.
+
+plugin_dlg_hook(Name) ->
+    {hook,
+        fun(Key, Value, Store) ->
+            case Key of
+                plugin ->
+                    {Mod,_} = Value,
+                    wings_dialog:enable(show_plugin_dlg,Mod=/=none,Store);
+                show_plugin_dlg ->
+                    {PlgMod,_} = wings_dialog:get_value(plugin,Store),
+                    Mat0 = wings_dialog:get_value(material,Store),
+                    Env = wx:get_env(),
+                    spawn(fun() ->
+                        %% Need open dialog in dialog from another process
+                        wx:set_env(Env),
+                        SetValue =
+                            fun(Res) ->
+                                {ok,Mat} =  plugin_results(Name,Mat0,Res,PlgMod),
+                                wings_dialog:set_value(material, Mat, Store),
+                                {return, Mat}
+                            end,
+                        [{PlgName,Qs}] = PlgMod:dialog({material_editor_setup,Name,Mat0}, []),
+                        Title = PlgName ++ ": " ++ atom_to_list(Name),
+                        wings_dialog:dialog(Title,[{vframe, [Qs]}],SetValue),
+                        wings_wm:psend(send_once, dialog_blanket, show)
+                    end)
+            end
+        end}.
+
+plugin_dlg_menu(_, []) -> [];
+plugin_dlg_menu(Name, Plugins) ->
+    [{_,PlgId}|_] = Opts = [{?__(1,"Select..."),{none,none}}]++[{PlgName,{Pm,Tag}} || {Pm,{PlgName,Tag}} <- lists:sort(Plugins)],
+    DefPlg = wings_pref:get_value(material_default_plugin,PlgId),
+    Hook = plugin_dlg_hook(Name),
+    [{hframe, [
+         {label_column,
+          [{?__(2,"Available"), {menu, Opts, DefPlg, [{key,plugin},Hook]}}]},
+         {button, ?__(3,"Edit Property..."),show_plugin_dlg,[{key,show_plugin_dlg},Hook]}
+     ],[{title," " ++ ?__(4,"Plugins") ++ " "}]}
+    ].
 
 vertex_color_menu(multiply) ->
     vertex_color_menu(set);
@@ -746,12 +817,12 @@ vertex_color_menu(Def) ->
 maybe_assign(false, _, St) -> St;
 maybe_assign(true, Name, St) -> set_material(Name, St).
 
-plugin_results(Name, Mat0, Res0) ->
-    case wings_plugin:dialog_result({material_editor_result,Name,Mat0}, Res0) of
-	{Mat,[{result,ok}]} -> {ok,Mat};
-	{_,Res} ->
-	    io:format(?__(1,"Material editor plugin(s) left garbage:~n    ~P~n"),
-		      [Res,20]),
+plugin_results(Name, Mat0, Res0, Mod) ->
+    case wings_plugin:dialog_result({material_editor_result,Name,Mat0}, Res0, Mod) of
+        {Mat,[]} -> {ok,Mat};
+        {_,Res} ->
+            io:format(?__(1,"Material editor plugin(s) left garbage:~n    ~P~n"),
+                      [Res,20]),
             wings_u:error_msg(?__(2,"Plugin(s) left garbage"))
     end.
 
@@ -763,7 +834,7 @@ ask_prop_put(Key, {R,G,B}, Opacity) ->
     {Key,{R,G,B,Opacity}}.
 
 setup_sphere() ->
-    {Len, Tris, Normals, UVs, Tgs} =
+    #{size:=Len, tris:=Tris, ns:=Normals, uvs:=UVs, tgs:=Tgs} =
         wings_shapes:tri_sphere(#{subd=>4, ccw=>false, normals=>true, tgs=>true,
                                   uvs=>true, scale=>0.45}),
     Data = zip(Tris, Normals, UVs, Tgs),

@@ -90,7 +90,6 @@ native_theme() ->
 	     ],
     OS = element(2, os:type()),
     Version = os:version(),
-    wx:new(),
     [native(Opt, OS, Version) || Opt <- UserIF] ++ [{flat_color_panels, true}| Workspace].
 
 %% Windows Versions
@@ -104,7 +103,7 @@ native_theme() ->
 %% wxWidgets seems to have a hard time to find them.
 
 native({What=background_color, _}, linux, _) ->
-    {What, {0.8,0.8,0.8}};
+    {What, default(menubar)};
 native({What=menu_color, menu}, linux, _Ver) ->
     {What, wings_color:rgb4fv(wxSystemSettings:getColour(wx_id(menubar)))};
 native({What, MenuText}, linux, _)
@@ -117,6 +116,8 @@ native({What=menu_color, menu}, darwin, Ver) ->
     native({What, c3dface}, darwin, Ver);
 native({What=outliner_geograph_bg, c3dshadow}, darwin, Ver) ->
     native({What, c3dface}, darwin, Ver);
+native({What=outliner_geograph_bg, c3dshadow}, linux, Ver) ->
+    native({What, menubar}, linux, Ver);
 native({What=title_active_color, activecaption}, darwin, _Ver) ->
     {What, e3d_vec:mul(default(c3dface), 1.07)};
 native({What=title_passive_color, inactivecaption}, darwin, _Ver) ->

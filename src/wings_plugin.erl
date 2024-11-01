@@ -12,7 +12,8 @@
 %%     $Id$
 %%
 -module(wings_plugin).
--export([init/0,menu/2,dialog/2,dialog_result/2,command/2,call_ui/1]).
+-export([init/0,menu/2,has_dialog/1,dialog/2,
+         dialog_result/2,dialog_result/3,command/2,call_ui/1]).
 -export([install/1]).
 -export([draw/4,check_plugins/2,get_win_data/1,restore_window/6]).
 -include("wings.hrl").
@@ -24,7 +25,7 @@
 %%% sub-directories to any level will be searched.
 %%% The plugin directory must be named 'plugins'. It must be located
 %%% either in the same directory as the beam files, or in a directory
-%%% parallell to the 'ebin' directory if the beam files are kept in
+%%% parallel to the 'ebin' directory if the beam files are kept in
 %%% a 'ebin' directory.
 %%%
 %%% To avoid name space clashing, plugins must be named according to
@@ -80,6 +81,23 @@ menu_1([M|Ps], Name, Menu0) ->
 menu_1([], _Name, Menu) -> Menu.
 
 
+has_dialog(Dialog) ->
+    has_dialog_1(Dialog,?GET(wings_plugins),[]).
+
+has_dialog_1(_, [], Acc) -> Acc;
+has_dialog_1(Dialog, [M|Tail], Acc) ->
+    case catch M:has_dialog(Dialog) of
+        {'EXIT',{undef,_}} ->
+            has_dialog_1(Dialog, Tail, Acc);
+        {'EXIT',Reason} ->
+            io:format("~w:has_dialog/1: crashed: ~P\n", [M,Reason,20]),
+            wings_u:error_msg("~w:has_dialog/1: crashed", [M]);
+        DlgId when is_tuple(DlgId) ->
+            has_dialog_1(Dialog, Tail, [{M,DlgId}|Acc]);
+        _ ->
+            has_dialog_1(Dialog, Tail, Acc)
+    end.
+
 dialog(Dialog, Ps) when is_list(Ps) ->
     dialog_1(Dialog, Ps, ?GET(wings_plugins)).
 
@@ -113,6 +131,9 @@ check_dialog([], _) -> [].
 
 dialog_result(Dialog, Ps) when is_tuple(Dialog), is_list(Ps) ->
     dialog_result1(Dialog, Ps, ?GET(wings_plugins)).
+
+dialog_result(Dialog, Ps, Module) when is_tuple(Dialog), is_list(Ps) ->
+	dialog_result1(Dialog, Ps, [Module]).
 
 dialog_result1(Dialog, Ps, [M|Tail]) ->
     case catch M:dialog(Dialog, Ps) of
@@ -387,7 +408,7 @@ is_plugin(Name) ->
     end.
 
 plugin_dir() ->
-    filename:join([wings_u:basedir(user_data), ?WINGS_VERSION, "plugins"]).
+    filename:join([wings_u:basedir(user_data), wings_u:version(), "plugins"]).
 
 %%%
 %%% Plug-in manager.
@@ -496,7 +517,7 @@ mk_dialog_1([]) -> [].
 
 plugin_modules(C, Ms) ->
     Ps = [{info,?__(1,"Enable or disable this plug-in ")++
-	       ?__(2,"(a disbled plug-in does not show up in menus)")},
+	       ?__(2,"(a disabled plug-in does not show up in menus)")},
 	  {proportion, 1}],
     {vframe,
      [{hframe, [{atom_to_list(M), member(M, ?GET(wings_plugins)), [{key,M}|Ps]},

@@ -37,10 +37,20 @@
 -define(IS_SPLIT(WinProp), (element(1, WinProp) =:= split
 			    orelse element(1, WinProp) =:= split_rev)).
 
+-ifndef(wxID_OSX_HIDE).
 -define(wxID_OSX_HIDE, 5250).
+-endif.
+-ifndef(wxID_OSX_HIDEOTHERS).
 -define(wxID_OSX_HIDEOTHERS, 5251).
+-endif.
+-ifndef(wxID_OSX_SHOWALL).
 -define(wxID_OSX_SHOWALL, 5252).
+-endif.
+-ifndef(wxID_OSX_MENU_LAST).
 -define(wxID_OSX_MENU_LAST, 5255).
+-endif.
+
+-define(GL_WAIT, 200).
 
 %% API  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -70,39 +80,10 @@ top_menus(WorkAround) ->
      |Tail].
 
 make_win(Title, Opts) ->
-    case proplists:get_value(internal, Opts, false) of
-	false -> {make_win(?GET(top_frame), Title, Opts), [external|Opts]};
-	_WinProps  -> {?GET(top_frame), [{title, Title}|Opts]}
-    end.
-
-make_win(Parent, Title, Ps) ->
-    FStyle = {style, ?wxCAPTION bor ?wxCLOSE_BOX bor ?wxRESIZE_BORDER},
-    {Size, MinSize} = case lists:keyfind(size, 1, Ps) of
-			  {size, Sz} -> {Sz, Sz};
-			  false  -> {false, {100, 100}}
-	   end,
-    Opts = case lists:keyfind(pos, 1, Ps) of
-	       {pos, Pos0} ->
-		   TopFrame = ?GET(top_frame),
-		   Pos1 = wxWindow:clientToScreen(TopFrame, Pos0),
-		   Pos  = validate_pos(Pos1, MinSize, wx_misc:displaySize()),
-		   [{pos,Pos}];
-	       false  ->
-		   []
-	   end,
-    Frame = (useframe()):new(Parent, ?wxID_ANY, Title, [FStyle|Opts]),
-    Size =/= false andalso wxWindow:setClientSize(Frame, Size),
-    Frame.
-
-useframe() ->
-    %% Miniframes can't be resized in gtk and wxWidgets 3.1
-    case {os:type(), {?wxMAJOR_VERSION, ?wxMINOR_VERSION}} of
-        {{_, linux}, Ver} when Ver > {3,0} ->  wxFrame;
-        _ -> wxMiniFrame
-    end.
+    wx_object:call(?MODULE, {make_win, [{title, Title}|Opts]}).
 
 register_win(Window, Name, Ps) ->
-    wx_object:call(?MODULE, {new_window, Window, Name, Ps}).
+    wx_object:call(?MODULE, {register_window, Window, Name, Ps}).
 
 reset_layout() ->
     {Contained, Free} = wx_object:call(?MODULE, get_windows),
@@ -163,7 +144,14 @@ update_theme() ->
     wx_object:call(?MODULE, update_theme).
 
 close(Win) ->
-    wx_object:call(?MODULE, {close, Win}).
+    case wx_object:call(?MODULE, {close, Win}) of
+        {ignored, _} ->
+            ok;
+        {closed, NeedReset} ->
+            reset_opengl(NeedReset),
+            ok
+    end.
+
 
 set_focus(Win) ->
     wx_object:cast(?MODULE, {active, Win}).
@@ -180,6 +168,9 @@ show_toolbar(Show) ->
 get_top_frame() ->
     wx_object:call(?MODULE, get_top_frame).
 
+need_gl_reset() ->
+    wx_object:call(?MODULE, need_gl_reset).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 validate_pos({X,Y}=Pos, {Sx, Sy}, {DW, DH}) when X > 0, Y > 0 ->
@@ -193,6 +184,7 @@ import_layout({Contained, Free}, St) ->
     Contained =/= [] andalso imp_layout(Contained, [], undefined, St),
     wx_object:call(?MODULE, {update_layout,Contained}),
     _ = [restore_window(Win, St) || Win <- Free],
+    reset_opengl(need_gl_reset()),
     ok.
 
 %% Remove "don't save" windows and the corresponding Splitter
@@ -212,6 +204,7 @@ save_window(palette) -> true;
 save_window({tweak, _}) -> true;
 save_window(outliner) -> true;
 save_window(wings_outliner) -> true;
+save_window(wings_view_win) -> true;
 save_window({object,_}) -> true;
 save_window(geom) -> true;
 save_window({geom,_}) -> true;
@@ -240,7 +233,6 @@ save_geom_props({current_view,View}, Acc) ->
     [{fov,Fov},{clipping_planes,{Hither,Yon}}|Acc];
 save_geom_props(_, Acc) -> Acc.
 
-
 imp_layout([{split, Mode, Pos}|Rest], Path, Split0, St) ->
     Cont0 = imp_layout(Rest, Path, Split0, St),
     imp_layout(Cont0, [second|Path], {Mode,Pos}, St);
@@ -267,6 +259,8 @@ restore_window({{object,_}=Name,Pos,{_,_}=Size,Ps}, St) ->
     wings_geom_win:window(Name, Pos, Size, Ps, St);
 restore_window({wings_outliner,Pos,{_,_}=Size, Ps}, St) ->
     wings_outliner:window(Pos, Size, Ps, St);
+restore_window({wings_view_win,Pos,{_,_}=Size, Ps}, St) ->
+    wings_view_win:window(Pos, Size, Ps, St);
 restore_window({palette,Pos,{_,_}=Size, Ps}, St) ->
     wings_palette:window(Pos, Size, Ps, St);
 restore_window({console,Pos,{_,_}=Size, Ps}, _St) ->
@@ -339,11 +333,13 @@ init(_Opts) ->
 	wxWindow:connect(Frame, activate, [{skip, true}]),
         init_menubar(Frame),
         wxFrame:show(Frame),
-	Wins = #{frame=>Frame, ch=>Top#split{w1=Canvas}, szr=>Sizer,
-		 loose=>#{}, action=>undefined, op=>undefined},
+	Wins0 = #{frame=>Frame, ch=>Top#split{w1=Canvas}, szr=>Sizer,
+                  loose=>#{}, action=>undefined, op=>undefined},
 	Overlay = make_overlay(Frame),
         %% Init OpenGL from wings process
-        wings ! {frame_created, Frame},
+        Opts = [top, {title, wings:geom_title(geom)}],
+        {{Win, Info}, Wins} = create_internal_win(undefined, Opts, Wins0),
+        wings ! {frame_created, Frame, Win, Info},
         receive opengl_initialized -> ok end,
 	{Frame, #state{toolbar=Toolbar, images=IconImgs, windows=Wins, overlay=Overlay}}
     catch _:Reason:ST ->
@@ -366,11 +362,18 @@ make_splash(Canvas, Imgs) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%
 
-handle_event(#wx{obj=Win, event=#wxMove{}}, State) ->
+handle_event(#wx{obj=Obj, event=#wxMove{}}, #state{windows=#{loose:=Loose}} = State) ->
     MS = wx_misc:getMouseState(),
     {X,Y} = wx_misc:getMousePosition(),
-    %% io:format("Move ~p ~p ~p ~n", [Win, X,Y]),
-    {noreply, preview_attach(stopped_moving(MS), {X,Y}, Win, State)};
+    Find = fun(#win{frame=Frame, name=Name}) ->
+                   wings_util:wxequal(Frame, Obj) andalso save_window(Name)
+           end,
+    case lists:any(Find, maps:values(Loose)) of
+        true ->
+            {noreply, preview_attach(stopped_moving(MS), {X,Y}, Obj, State)};
+        false ->
+            {noreply, State}
+    end;
 
 handle_event(#wx{userData={move,Win}, event=Ev}, #state{windows=Wins0} = State) ->
     Wins = detach_window(Ev, Win, Wins0),
@@ -446,37 +449,40 @@ handle_event(_Ev, State) ->
 
 %%%%%%%%%%%%%%%%%%%%%%
 
-handle_call({new_window, Window, Name, Ps}, _From,
-	    #state{windows=Wins=#{loose:=Loose, ch:=Top}}=State) ->
+handle_call({make_win, Opts}, _From, #state{windows=Wins0}=State) ->
+    case proplists:get_value(internal, Opts, false) of
+	false ->
+            {reply, create_external_win(?GET(top_frame), Opts), State};
+	WinProps  ->
+            {Reply, Wins} = create_internal_win(WinProps, Opts, Wins0),
+            {reply, Reply, State#state{windows=Wins}}
+    end;
+
+handle_call({register_window, Window, Name, Ps}, _From,
+	    #state{windows=Wins=#{frame:=_TopFrame, loose:=Loose, ch:=Top}}=State) ->
     External = proplists:get_value(external, Ps),
     Internal = proplists:get_value(internal, Ps, false),
-    Geom = proplists:get_value(top, Ps),
-    Win0 = #win{win=Window, name=Name},
+    IsGeom = proplists:get_value(top, Ps),
+    Win0 = proplists:get_value(gui_win, Ps),
+    #win{frame = Frame} = Win0,
+    Win = Win0#win{win=Window, name=Name},
     if External ->
-	    Frame = wx:typeCast(wxWindow:getParent(Window), useframe()),
-	    Title = wxFrame:getTitle(Frame),
-	    Win = Win0#win{frame=Frame, title=Title, ps=#{close=>true, move=>true}},
-	    wxWindow:connect(Frame, move),
-	    wxWindow:connect(Frame, close_window),
 	    wxFrame:show(Frame),
 	    {reply, ok, State#state{windows=Wins#{loose:=Loose#{Frame => Win}}}};
        Internal =/= false ->
-	    Title = proplists:get_value(title, Ps),
-	    Win = Win0#win{title=Title, ps=#{close=>true, move=>true}},
-	    Ws = make_internal_win(Internal, Win, Wins),
+	    Ws = insert_internal_win(Win, Wins),
 	    {reply, ok, State#state{windows=Ws}};
-       Geom -> %% Specialcase for geom window
-	    Title = proplists:get_value(title, Ps),
-	    #split{w1=Dummy} = Top,
-	    Win1 = Win0#win{title=Title, ps=#{close=>false, move=>false}},
-	    Win = make_internal_win(win(Top), Win1),
-	    wxSplitterWindow:replaceWindow(win(Top), Dummy, win(Win)),
-	    wxWindow:destroy(Dummy),
+       IsGeom -> %% Specialcase for geom window
+            #split{w1=Splash} = Top,
+	    wxSplitterWindow:replaceWindow(win(Top), Splash, Frame),
+	    wxWindow:destroy(Splash),
+            layout_new_win(Win),
 	    {reply, ok, State#state{windows=Wins#{ch:=Top#split{w1=Win}}}}
     end;
 
-handle_call({close, Win}, _From, State) ->
-    {reply, ok, close_win(Win, State)};
+handle_call({close, Win}, _From, State0) ->
+    {Res, NeedReset, State} = close_win(Win, State0),
+    {reply, {Res, NeedReset}, State};
 
 handle_call(get_windows, _From, #state{windows=#{loose:=Loose, ch:=Top}}=State) ->
     Contained = export_contained(Top),
@@ -508,6 +514,10 @@ handle_call({show_toolbar, Bool}, _From, #state{windows=#{frame:=Frame}}=State) 
 handle_call(get_top_frame, _, #state{windows=#{frame:=Frame}}=State) ->
     {reply, Frame, State};
 
+handle_call(need_gl_reset, _, State0) ->
+    {Reset, State} = need_gl_reset(State0),
+    {reply, Reset, State};
+
 handle_call(Req, _From, State) ->
     io:format("~p:~p Got unexpected call ~p~n", [?MODULE,?LINE, Req]),
     {reply, ok, State}.
@@ -520,6 +530,7 @@ handle_cast({mode_restriction, _}=Restrict, #state{toolbar=TB}=State) ->
 handle_cast({menu, {Menu, Key, Value}=Update}, #state{toolbar=TB}=State) ->
     wings_menu:update_menu_enabled(Menu, Key, Value),
     wings_toolbar:update(Update, TB),
+    wings_view_win:update(Update),
     {noreply, State};
 handle_cast({got_focus, Window, Props}, #state{toolbar=TB0}=State) ->
     Fun = fun(Menu, Key, Value) ->
@@ -565,9 +576,13 @@ handle_info({close_window, Obj}, #state{windows=#{ch:=Root}} = State0) ->
 		false -> State0;
 		#win{win=Win, name=Name} ->
 		    try wx_object:get_pid(Win) of
-			_Pid  -> close_win(Win, State0)
-		    catch _:_ -> %% Geom window, let wings_wm handle it first
-			    wings_wm:psend(Name, close),
+			_Pid  ->
+                            After = fun({_,NeedReset,_}) -> reset_opengl(NeedReset) end,
+                            Close = fun() -> close_win(Win, State0) end,
+                            {_, _, State1} = wings_io:lock(whereis(wings), Close, After),
+                            State1
+                    catch _:_ -> %% Geom window, let wings_wm handle it first
+                            wings_wm:psend(Name, close),
 			    State0
 		    end
 	    end,
@@ -679,9 +694,11 @@ preview_attach(false, Pos, Frame,
   when Action =:= undefined; Action =:= preview_attach ->
     case get_split_path(Pos, Wins) of
 	ignore -> %% Outside attached window
+            wings_status:message(?MODULE, ""),
 	    overlay_hide(Overlay),
 	    State#state{windows=delete_timer(Wins)};
 	Path ->
+            wings_status:message(?MODULE, ?__(1, "Hold SHIFT to not attach window")),
 	    {Rect,_} = preview_rect(Path, Frame),
 	    overlay_draw(Overlay, Rect, 170),
 	    State#state{windows=setup_timer(Frame, Path, delete_timer(Wins))}
@@ -711,18 +728,26 @@ preview_rect({Obj, Path}, Frame) ->
     end.
 
 make_overlay(Parent) ->
-    Flags = ?wxFRAME_TOOL_WINDOW bor
-	?wxSTAY_ON_TOP bor
+    Flags0 =
+        ?wxFRAME_TOOL_WINDOW bor
 	?wxFRAME_NO_TASKBAR bor
-	?wxNO_BORDER,
+        ?wxSTAY_ON_TOP,
     Overlay = wxFrame:new(),
-    case {os:type(), {?wxMAJOR_VERSION, ?wxMINOR_VERSION}} of
-        {{_, linux}, Ver} when Ver > {3,0} ->
-            wxFrame:setBackgroundStyle(Overlay, 3); %% ?wxBG_STYLE_TRANSPARENT
-        _ -> ok
-    end,
-    true = wxFrame:create(Overlay, Parent, -1, "", [{style, Flags}]),
+    Flags = case {os:type(), {?wxMAJOR_VERSION, ?wxMINOR_VERSION}} of
+                {{_, linux}, Ver} when Ver >= {3,2} ->
+                    wxFrame:setBackgroundStyle(Overlay, ?wxBG_STYLE_TRANSPARENT),
+                    Flags0 bor ?wxNO_BORDER;
+                {{_, linux}, Ver} when Ver >= {3,0} ->
+                    wxFrame:setBackgroundStyle(Overlay, ?wxBG_STYLE_TRANSPARENT),
+                    Flags0;
+                _ ->
+                    Flags0 bor ?wxNO_BORDER
+            end,
+    true = wxFrame:create(Overlay, Parent, -1, "", [{style, Flags}, {size, {300,300}}]),
     wxFrame:setBackgroundColour(Overlay, {95,138,255,200}),
+    Panel = wxPanel:new(Overlay),
+    wxFrame:setBackgroundColour(Panel, {95,138,255,200}),
+    catch wxFrame:setTransparent(Overlay, 120),
     Overlay.
 
 overlay_draw(Overlay, Rect, Alpha) ->
@@ -736,68 +761,76 @@ overlay_hide(Overlay) ->
 attach_floating(false, _, #{op:=Op}=State) when Op =/= undefined ->
     setup_timer(State);
 attach_floating(true, Overlay, #{op:=#{mwin:=Frame, mpath:=Path}, loose:=Loose}=State) ->
+    wings_status:message(?MODULE, ""),
     case maps:get(Frame, Loose, false) of
 	false ->
 	    State#{action:=undefined, op:=undefined};
 	#win{win=Win}=Window ->
 	    overlay_hide(Overlay),
-	    %% io:format("Attach window ~p ~p ~p~n",[Frame,Path,wxWindow:getClientSize(Window)]),
-	    St = State#{loose:=maps:remove(Frame,Loose), action:=undefined, op:=undefined},
-	    DoWhileLocked = fun() -> attach_window(Path, Frame, Window, St) end,
-	    After = fun() ->
-			    timer:sleep(200), %% give wx time to update windows on X11
-			    wings_io:reset_video_mode_for_gl(0,0),
+	    %% ?dbg("Attach window ~p ~p ~p~n",[Frame,Path,Window]),
+	    St0 = State#{loose:=maps:remove(Frame,Loose), action:=undefined, op:=undefined},
+	    DoWhileLocked = fun() -> attach_window(Path, Frame, Window, St0) end,
+	    After = fun({_, NeedReset}) ->
+                            reset_opengl(NeedReset),
                             inform_parent_changed(Win)
 		    end,
-	    wings_io:lock(whereis(wings), DoWhileLocked, After)
+	    {St, _ } = wings_io:lock(whereis(wings), DoWhileLocked, After),
+            St
     end;
 attach_floating(_B, Overlay, State) ->
     %% Spurious Move events on windows
+    wings_status:message(?MODULE, ""),
     overlay_hide(Overlay),
     State#{action:=undefined, op:=undefined}.
 
 attach_window({_,Path}=Split, WinFrame, NewWin, #{frame:=TopFrame, szr:=Szr, ch:=Child} = State) ->
     Attach = fun() ->
 		     {_,Pos} = preview_rect(Split, NewWin),
-		     Win = make_internal_win(win(Child), NewWin),
+                     MakeWin = fun(Parent) -> make_internal_win(Parent, NewWin) end,
+		     {Root, _NewWin, NeedReset} = split_win(Path, MakeWin, Child, Pos),
 		     wxWindow:destroy(WinFrame),
-		     Root = split_win(Path, Win, Child, Pos),
 		     case win(Root) =:= win(Child) of
 			 false -> wxSizer:replace(Szr, win(Child), win(Root));
 			 true  -> ignore
 		     end,
-		     %wxSizer:layout(Szr),
                      wxFrame:layout(TopFrame),
                      wxWindow:refresh(win(Root)),
 		     check_tree(Root, Child),
-		     State#{ch:=Root}
+		     {State#{ch:=Root}, NeedReset}
 	     end,
     wings_io:batch(Attach).
 
-split_win([Dir], NewWin, Node, Pos0) ->
+split_win([Dir], MakeWin, Node, Pos0) ->
     {Mode, Which} = split(Dir),
     Pos = pos_from_permille(Pos0, Mode, win(Node)),
     case Node of
-	#split{mode=undefined, w1=Root} -> %% Top Window
-	    set_splitter(Which, Mode, Pos, Node, Root, NewWin);
+	#split{mode=undefined, w1=Root, obj=Splitter} -> %% Top Window
+            NewWin = MakeWin(Splitter),
+	    {set_splitter(Which, Mode, Pos, Node, Root, NewWin), NewWin, false};
 	_Leaf ->
 	    Parent = wxWindow:getParent(win(Node)),
 	    NewNode = make(Parent),
-	    reparent(NewWin, NewNode),
+	    NewWin = MakeWin(win(NewNode)),
 	    reparent(Node, NewNode),
-	    set_splitter(Which, Mode, Pos, NewNode, Node, NewWin)
+            Bool = node_needs_to_reset(Node),
+            %% ?dbg("~p ~p~n", [Bool, Node]),
+	    {set_splitter(Which, Mode, Pos, NewNode, Node, NewWin), NewWin, Bool}
     end;
-split_win([Which|Path], NewWin, #split{mode=Mode} = Node, Pos) ->
+split_win([Which|Path], MakeWin, #split{mode=Mode} = Node, Pos) ->
     {Child0, Child1} = child(Which, Node),
-    Child = split_win(Path, NewWin, Child0, Pos),
+    {Child, NewWin, NeedReset} = split_win(Path, MakeWin, Child0, Pos),
     wxSplitterWindow:replaceWindow(win(Node), win(Child0), win(Child)),
-    set_splitter(Which, Mode, false, Node, Child1, Child).
+    {set_splitter(Which, Mode, false, Node, Child1, Child), NewWin, NeedReset};
+split_win([_|Path], MakeWin, Node, Pos0) ->
+    %% Something went wrong here a plugin or window we don't know about
+    %% in this release was not created as it should so the path was incorrect
+    split_win(Path, MakeWin, Node, Pos0).
 
 make(Parent) ->
     Style = case os:type() of
 		{unix, darwin} -> ?wxSP_3DSASH bor ?wxSP_LIVE_UPDATE;
 		{win32, _} -> ?wxSP_BORDER bor ?wxSP_LIVE_UPDATE;
-		_ -> ?wxSP_3D bor ?wxSP_LIVE_UPDATE
+		_ -> ?wxSP_3DBORDER bor ?wxSP_LIVE_UPDATE
 	    end,
     New = wxSplitterWindow:new(Parent, [{style, Style}]),
     wxSplitterWindow:setSashGravity(New, 0.5),
@@ -817,9 +850,12 @@ set_splitter(second, Mode, Pos, Sp, W1, W2) ->
     end,
     Sp#split{mode=Mode, w1=W1, w2=W2}.
 
-reparent(Child, #split{obj=Obj}) ->
-    wxWindow:reparent(win(Child), Obj),
-    Child.
+reparent(Child, Obj) ->
+%%    ?dbg("Reparent(~w, ~w)~n  ~p~n", [win(Child), win(Obj),
+%%            element(2, process_info(self(), current_stacktrace))]),
+    true = wxWindow:reparent(win(Child), win(Obj)),
+    ok.
+
 
 stopped_moving(#wxMouseState{leftDown=L, middleDown=M, rightDown=R, shiftDown=Shift}=_MS) ->
     %% io:format("~p ~p ~p ~p~n",[L, M, R, _MS]),
@@ -943,49 +979,47 @@ close_win(Win, #state{windows=#{frame:=TopFrame,ch:=Tree,loose:=Loose,szr:=Szr}=
 		#win{frame=Frame} = _Win ->
 		    wxFrame:destroy(Frame),
                     _ = wxWindow:findFocus(), %% Sync the destroy
-		    State#state{windows=Wins#{loose:=maps:remove(Frame, Loose)}};
+		    {closed, false, State#state{windows=Wins#{loose:=maps:remove(Frame, Loose)}}};
 		false ->
-		    %% wxWindow:destroy(Win),
-		    State
+                    {ignored, false, State}
 	    end;
 	#win{frame=Obj} ->
             Close = fun(Where, Other, GrandP) -> close_window(Obj, Where, Other, GrandP, Szr) end,
-            Root = wx:batch(fun() ->
-                                    {ok, Root} = update_win(Obj, Tree, Tree, Close),
-                                    check_tree(Root, Tree),
-                                    wxFrame:layout(TopFrame),
-                                    wxWindow:refresh(TopFrame),
-                                    Root
-                            end),
-            timer:sleep(200), %% give wx time to update windows on X11
-            wings_io:reset_video_mode_for_gl(0,0),
-	    State#state{windows=Wins#{ch:=Root}}
+            {NeedReset, Root} =
+                wx:batch(fun() ->
+                                 {NeedReset, Root} = update_win(Obj, Tree, Tree, Close),
+                                 check_tree(Root, Tree),
+                                 wxFrame:layout(TopFrame),
+                                 wxWindow:refresh(TopFrame),
+                                 {NeedReset, Root}
+                         end),
+	    {closed, NeedReset, State#state{windows=Wins#{ch:=Root}}}
     end.
 
 close_window(Delete, Split, Other, GrandP, Szr) ->
     case GrandP of
 	Split when is_record(Other, win) -> %% TopLevel
             wxWindow:hide(Delete),
-	    wxWindow:reparent(win(Other), win(GrandP)),
+	    %% reparent(win(Other), win(GrandP)),
 	    wxSplitterWindow:unsplit(win(GrandP), [{toRemove, Delete}]),
 	    wxWindow:destroy(Delete),
             _ = wxWindow:findFocus(), %% Sync the destroy
-	    {ok, GrandP#split{mode=undefined, w1=Other, w2=undefined}};
+	    {false, GrandP#split{mode=undefined, w1=Other, w2=undefined}};
 	Split when is_record(Other, split) ->
 	    Frame = wxWindow:getParent(win(GrandP)),
-	    wxWindow:reparent(win(Other), Frame),
+	    reparent(win(Other), Frame),
             wxSizer:replace(Szr, win(GrandP), win(Other)),
             wxWindow:hide(win(GrandP)),
 	    wxWindow:destroy(win(GrandP)),
             _ = wxWindow:findFocus(), %% Sync the destroy
-	    {ok, Other};
+	    {node_needs_to_reset(Other), Other};
 	#split{} ->
-	    wxWindow:reparent(win(Other), win(GrandP)),
+	    reparent(win(Other), win(GrandP)),
 	    wxSplitterWindow:replaceWindow(win(GrandP), win(Split), win(Other)),
             wxWindow:hide(win(Split)),
 	    wxWindow:destroy(win(Split)),
             _ = wxWindow:findFocus(), %% Sync the destroy
-	    {ok, Other}
+	    {node_needs_to_reset(Other), Other}
     end.
 
 detach_window(#wxMouse{type=motion, leftDown=true, x=X,y=Y}, _OldFrame,
@@ -1008,16 +1042,17 @@ detach_window(#wxMouse{type=motion, leftDown=true, x=X,y=Y}, OldFrame,
 	    Displace = {X1-XB, Y1-YB},
 	    WhileLocked = fun() ->
 				  case wings_io:batch(fun() -> setup_detach(Win, State) end) of
-				      {{true, Res}, Root} ->
+				      {{true, Res, NeedReset}, Root} ->
 					  receive
 					      #wx{obj=OldFrame, event=#wxShow{}} ->
-						  {Res, Root}
+						  {Res, NeedReset, Root}
 					  end;
-				      {{false, Res}, Root} ->
-					  {Res, Root}
+				      {{false, Res, NeedReset}, Root} ->
+					  {Res, NeedReset, Root}
 				  end
 			  end,
-	    {NewWin, Root} = wings_io:lock(whereis(wings), WhileLocked),
+            DoAfter =  fun({_, NeedReset, _}) -> reset_opengl(NeedReset) end,
+	    {NewWin, _, Root} = wings_io:lock(whereis(wings), WhileLocked, DoAfter),
 	    check_tree(Root, maps:get(ch, State)),
 	    #win{frame=Frame,win=W1}=NewWin,
             inform_parent_changed(W1),
@@ -1065,28 +1100,30 @@ do_detach_window(#win{frame=Container, win=Child, title=Label}=Win,
     {W,H} = wxWindow:getClientSize(Container),
     PosSz = {X,Y,W,H},
     wxWindow:setSize(Container, {-1,-1,1,1}),
-    wxWindow:reparent(Container, Top),
-    FrameW = make_external_win(Top, Child, PosSz, Label),
+    reparent(Container, Top),
+    FrameW = detach_to_external_win(Top, Child, PosSz, Label),
     Frame = Win#win{frame=FrameW, bar=undefined},
     wxWindow:hide(Container),
     Sizer = wxWindow:getSizer(Container),
     wxSizer:detach(Sizer, Child),
     case GrandP of
 	top when is_record(Other, split) ->
-	    wxWindow:reparent(win(Other), Top),
+	    reparent(win(Other), Top),
 	    wxSizer:replace(Szr, win(Split), win(Other)),
 	    wxWindow:destroy(win(Split)),
-	    {{show_detached(Container), Frame}, Other};
+            Reset = node_needs_to_reset(Other),
+	    {{show_detached(Container), Frame, Reset}, Other};
 	top ->
-	    wxWindow:reparent(win(Other), win(Split)),
+            %% Other must be geom
 	    wxSplitterWindow:unsplit(win(Split), [{toRemove, Container}]),
-	    {{show_detached(Container), Frame},
+	    {{show_detached(Container), Frame, false},
 	     Split#split{mode=undefined, w1=Other, w2=undefined}};
 	#split{} ->
-	    wxWindow:reparent(win(Other), win(GrandP)),
+	    reparent(win(Other), win(GrandP)),
 	    wxSplitterWindow:replaceWindow(win(GrandP), win(Split), win(Other)),
 	    wxWindow:destroy(win(Split)),
-	    {{show_detached(Container), Frame}, Other}
+            Reset = node_needs_to_reset(Other),
+	    {{show_detached(Container), Frame, Reset}, Other}
     end.
 
 show_detached(Window) ->
@@ -1106,11 +1143,11 @@ start_drag(DX, DY) ->
     (DX > wxSystemSettings:getMetric(?wxSYS_DRAG_X))
 	orelse (DY > wxSystemSettings:getMetric(?wxSYS_DRAG_Y)).
 
-make_external_win(Parent, Child, {X0,Y0, W, H} = _Dim, Label) ->
-    Frame = make_win(Parent, Label, [{pos, {X0,Y0}}, {size, {W,H}}]),
+detach_to_external_win(Parent, Child, {X0,Y0, W, H} = _Dim, Label) ->
+    {Frame,_} = create_external_win(Parent, [{title,Label}, {pos, {X0,Y0}}, {size, {W,H}}]),
     wxWindow:connect(Frame, move),
     wxWindow:connect(Frame, close_window),
-    wxWindow:reparent(Child, Frame),
+    reparent(Child, Frame),
     wxWindow:refresh(Child),
     wxWindow:update(Child),
     wxWindow:show(Frame),
@@ -1162,34 +1199,82 @@ setup_timer(#{op:=Op} = St) ->
     {ok, TRef} = timer:send_after(200, check_stopped_move),
     St#{op:=Op#{mtimer=>TRef}}.
 
-make_internal_win({Path, Pos}, NewWin, #{frame:=TopFrame, szr:=Szr, ch:=Child} = State) ->
-    Win  = make_internal_win(win(Child), NewWin),
-    Root = split_win(Path, Win, Child, {permille, Pos}),
-    case win(Root) =:= win(Child) of
-	false -> wxSizer:replace(Szr, win(Child), win(Root));
-	true  -> ignore
-    end,
-    %% wxSizer:layout(Szr),
+create_external_win(Parent, Ps) ->
+    FStyle = {style, ?wxCAPTION bor ?wxCLOSE_BOX bor ?wxRESIZE_BORDER},
+    {Size, MinSize} = case lists:keyfind(size, 1, Ps) of
+			  {size, Sz} -> {Sz, Sz};
+			  false  -> {false, {100, 100}}
+	   end,
+    Opts = case lists:keyfind(pos, 1, Ps) of
+	       {pos, Pos0} ->
+		   TopFrame = ?GET(top_frame),
+		   Pos1 = wxWindow:clientToScreen(TopFrame, Pos0),
+		   Pos  = validate_pos(Pos1, MinSize, wx_misc:displaySize()),
+		   [{pos,Pos}];
+	       false  ->
+		   []
+	   end,
+    Title = proplists:get_value(title, Ps),
+    Frame = (useframe()):new(Parent, ?wxID_ANY, Title, [FStyle|Opts]),
+    wxWindow:connect(Frame, move),
+    wxWindow:connect(Frame, close_window),
+    Size =/= false andalso wxWindow:setClientSize(Frame, Size),
+    Win = #win{frame=Frame, title=Title, ps=#{close=>true, move=>true}},
+    {Frame, [{gui_win, Win},external|Ps]}.
+
+create_internal_win(PathPos, Ps, #{szr:=Szr, ch:=Root0} = State) ->
+    Title = proplists:get_value(title, Ps),
+    Win0  = case proplists:get_value(top, Ps) of
+                undefined -> #win{title=Title, ps=#{close=>true, move=>true}};
+                true -> #win{title=Title, ps=#{close=>false, move=>false}}
+            end,
+    case PathPos of
+        undefined ->
+            Win = make_internal_win(win(Root0), Win0),
+            {{win(Win), [{gui_win, Win}|Ps]}, State};
+        {Path, Pos} ->
+            MakeWin = fun(Parent) -> make_internal_win(Parent, Win0) end,
+            {Root, Win, NeedReset} = split_win(Path, MakeWin, Root0, {permille, Pos}),
+            case win(Root) =:= win(Root0) of
+                false -> wxSizer:replace(Szr, win(Root0), win(Root));
+                true  -> ignore
+            end,
+            check_tree(Root, Root0),
+            Reset = NeedReset orelse maps:get(reset, State, false),
+            {{win(Win), [{gui_win, Win}|Ps]}, State#{ch:=Root, reset => Reset}}
+    end.
+
+insert_internal_win(#win{frame=Frame} = Win, #{frame:=TopFrame, ch:=Root} = State) ->
+    layout_new_win(Win),
+    SetLabel = fun(#split{w1=W1}=Where, _Other, _Grand) when W1#win.frame=:=Frame ->
+                       {ok, Where#split{w1=Win}};
+                  (#split{w2=W2}=Where, _Other, _Grand) when W2#win.frame=:=Frame ->
+                       {ok, Where#split{w2=Win}}
+               end,
+    {ok, Tree} = update_win(Frame, Root, Root, SetLabel),
     wxFrame:layout(TopFrame),
     wxWindow:refresh(win(Root)),
-    check_tree(Root, Child),
-    State#{ch:=Root}.
+    State#{ch:=Tree}.
 
--define(WIN_BAR_HEIGHT, 16).
+layout_new_win(#win{frame=Frame, win=Win}) ->
+    Sizer = wxWindow:getSizer(Frame),
+    wxSizer:add(Sizer, Win,  [{proportion, 1}, {flag, ?wxEXPAND}, {border, 2}]),
+    wxWindow:layout(Frame).
 
-make_internal_win(Parent, #win{title=Label, win=Child, ps=#{close:=Close, move:=Move}}=WinC) ->
+make_internal_win(Parent,#win{title=Label, win=Child, ps=#{close:=Close, move:=Move}}=WinC) ->
     Win = wxPanel:new(Parent, []),
     PBG = wings_color:rgb4bv(wings_pref:get_value(title_passive_color)),
     {Bar,ST} = Wins = make_bar(Win, PBG, Label, Close),
-    case os:type() of
-	{win32, _} ->  wxWindow:setDoubleBuffered(Bar, true);
-	_ -> ignore
-    end,
     Top = wxBoxSizer:new(?wxVERTICAL),
     wxSizer:add(Top, Bar, [{proportion, 0}, {flag, ?wxEXPAND}, {border, 2}]),
-    wxWindow:reparent(Child, Win), %% Send event here
-    wxSizer:add(Top, Child,  [{proportion, 1}, {flag, ?wxEXPAND}, {border, 2}]),
+    case Child =:= undefined of
+        true -> ok;
+        false ->
+            reparent(Child, Win), %% Send event here
+            wxSizer:add(Top, Child,  [{proportion, 1}, {flag, ?wxEXPAND}, {border, 2}])
+    end,
     wxWindow:setSizer(Win, Top),
+    wxWindow:layout(Win),
     wxWindow:connect(Bar, enter_window, [{userData, {win, Win}}]),
     case Move of
         true ->
@@ -1200,8 +1285,14 @@ make_internal_win(Parent, #win{title=Label, win=Child, ps=#{close:=Close, move:=
     end,
     WinC#win{frame=Win, bar=Wins}.
 
+-define(WIN_BAR_HEIGHT, 16).
+
 make_bar(Parent, BG, Label, Close) ->
     Bar = wxPanel:new(Parent, [{style, ?wxBORDER_NONE}, {size, {-1, ?WIN_BAR_HEIGHT}}]),
+    case os:type() of
+	{win32, _} -> wxWindow:setDoubleBuffered(Bar, true);
+	_ -> ignore
+    end,
     FG = wings_pref:get_value(title_text_color),
     #{size:=Sz} = FI0 = wings_text:get_font_info(?GET(system_font_wx)),
     FI = FI0#{size:=Sz-1, weight=>bold},
@@ -1250,6 +1341,13 @@ make_close_button(Parent, Bar, WBSz, H) ->
     %% io:format("SBM = ~p~n",[wxWindow:getSize(SBM)]),
     wxSizer:add(WBSz, SBM, [{flag, ?wxALIGN_CENTER}]),
     wxWindow:connect(SBM, command_button_clicked, [{callback, CB}]).
+
+useframe() ->
+    %% Miniframes can't be resized in gtk and wxWidgets 3.1
+    case {os:type(), {?wxMAJOR_VERSION, ?wxMINOR_VERSION}} of
+        {{_, linux}, Ver} when Ver > {3,0} ->  wxFrame;
+        _ -> wxMiniFrame
+    end.
 
 export_loose(Windows) ->
     Exp = fun(#win{name=Name, win=Win, frame=Frame}) ->
@@ -1366,3 +1464,31 @@ init_menubar(Frame) ->
     wxFrame:setMenuBar(Frame, MB),
     erase(wm_active),
     MB.
+
+%%%%%%%%%%%%%
+
+need_gl_reset(#state{windows = Wins} = State) ->
+    case maps:get(reset, Wins, false) of
+        false -> {false, State};
+        true -> {true, State#state{windows = Wins#{reset := false}}}
+    end.
+
+node_needs_to_reset(#split{w1=W1,w2=W2}) ->
+    node_needs_to_reset(W1) orelse
+        node_needs_to_reset(W2);
+node_needs_to_reset(#win{win=Win}) ->
+    wx:getObjectType(Win) =:= wxGLCanvas.
+
+reset_opengl(false) ->
+%%    ?dbg("reset FALSE~n", []),
+    ok;
+reset_opengl(true) ->
+%%    ?dbg("reset TRUE~n", []),
+    case os:type() of
+        {unix, linux} ->
+            timer:sleep(?GL_WAIT); %% give wx time to realize windows on X11
+        _ ->
+            ok
+    end,
+    wings_io:reset_video_mode_for_gl(true),
+    ok.

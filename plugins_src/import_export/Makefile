@@ -30,10 +30,14 @@ endif
 
 MODULES= \
 	wpc_3ds \
+	wpc_3mf \
 	wpc_ai \
+	wpc_amf \
 	wpc_bzw \
 	wpc_collada \
 	collada_import \
+	wpc_fbx_p \
+	fbx_p_import \
 	wpc_gltf \
 	wpc_hlines \
 	wpc_jscad \
@@ -46,9 +50,13 @@ MODULES= \
 	wpc_rwx \
 	wpc_stl \
 	wpc_svg_path \
+	wpc_wmf_paths \
 	wpc_wrl \
 	wpc_x \
-	wpc_yafaray
+	x_import \
+	wpc_yafaray \
+	x3d_import \
+	x3d_import__sgi
 
 TARGET_FILES= $(MODULES:%=$(EBIN)/%.beam)
 

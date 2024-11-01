@@ -31,9 +31,9 @@
 -define(ANGFAC, 1.0).
 -define(DEGFAC, 10.0).
 -define(GTHRESH, 75).
--define(TOL, 0.0000001).
+-define(TOL, ?EPSILON).
 
-						% Triangulate an entire mesh.
+%% Triangulate an entire mesh.
 triangulate(#e3d_mesh{type=triangle}=Mesh) -> Mesh;
 triangulate(#e3d_mesh{type=polygon,fs=Fs0,vs=Vs}=Mesh) ->
     Fs = triangulate(Fs0, list_to_tuple(Vs), []),
@@ -155,10 +155,10 @@ vismask(A, B, Bord, Bit) ->
     end.
 
 triface(Fl,Vtab) -> 
-    %% We should have a qriteria for the start postion
+    %% We should have a qriteria for the start position
     %% to get a uniform triangulation, if we triangulates
     %% a grid of squares for example.
-    %% I have choosen the least vertex pos in 3d space of the face.
+    %% I have chosen the least vertex pos in 3d space of the face.
 
     Start = get_least_index(Fl ,Vtab),
 %    Start = 1, % qqq
@@ -510,7 +510,7 @@ revecheck(E={A,B}, TD, Bord, Vtab, Acc) ->
 
 %% If E is a non-border edge, with left-face triangle Tl and
 %% right-face triangle Tr, then it is "reversed" if the circle through
-%% A, B, and (say) the other vertex of Tl containts the other vertex of Tr.
+%% A, B, and (say) the other vertex of Tl contains the other vertex of Tr.
 isreversed(E={A,B}, TD, Bord, Vtab) ->
     case gb_sets:is_member(E, Bord) of
 	true -> false;
@@ -759,7 +759,7 @@ polygon_plane(Vs, Vcoords) ->
 	    Vtab = list_to_tuple(Vcoords),
 	    Ps = [element(V+1, Vtab) || V <- Vs],
 	    case e3d_vec:normal(Ps) of
-		{0.0,0.0,0.0} -> {0.0,0.0,1.0};
+		{+0.0,+0.0,+0.0} -> {0.0,0.0,1.0};
 		N -> N
 	    end
     end.
@@ -817,16 +817,15 @@ segsintersect(IA, IB, IC, ID, Vtab) ->
                              andalso TI > 0.0 andalso TI < 1.0);
                         true ->
                             %% parallel or overlapping
-                            case {dot2(U, U),dot2(V, V)} of
-                                {0.0,_} -> false;
-                                {_,0.0} -> false;
-                                {_,_} ->
+                            case abs(dot2(U, U)) < ?EPSILON orelse abs(dot2(V, V)) < ?EPSILON of
+                                true -> false;
+                                false ->
                                     %% At this point, we know that none of the
                                     %% segments are points.
                                     Z = sub2(B, C),
                                     {Wx,Wy}=W, {Zx,Zy}=Z,
-                                    {T0,T1} = case Vx of
-                                                  0.0 -> {Wy/Vy, Zy/Vy};
+                                    {T0,T1} = case abs(Vx) < ?EPSILON of
+                                                  true -> {Wy/Vy, Zy/Vy};
                                                   _ ->   {Wx/Vx, Zx/Vx}
                                               end,
                                     (0.0 < T0)

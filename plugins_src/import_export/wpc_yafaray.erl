@@ -4,7 +4,7 @@
 %%     YafaRay Plugin User Interface, for YafaRay Core v3.1.0
 %%
 %%  Copyright (c) 2003-2008 Raimo Niskanen
-%%                2013-2015 Code Convertion from Yafray to YafaRay by Bernard Oortman (Wings3d user oort)
+%%                2013-2015 Code Conversion from Yafray to YafaRay by Bernard Oortman (Wings3d user oort)
 %%                2015 Micheus (porting to use wx dialogs)
 %%                2016 David Bluecame (adaptation for YafaRay Core v3.1.0)
 %%
@@ -14,7 +14,7 @@
 %%
 
 -module(wpc_yafaray).
--export([init/0,menu/2,dialog/2,command/2]).
+-export([init/0,menu/2,dialog/2,has_dialog/1,command/2]).
 
 %% Debug exports
 %% -export([now_diff_1/1]).
@@ -72,6 +72,7 @@ key(Key) -> {key,?KEY(Key)}.
 -define(DEF_IOR, 1.4).
 -define(DEF_MIN_REFLE, 0.0).
 -define(DEF_OBJECT_TYPE, mesh).
+-define(DEF_VISIBILITY, normal).
 -define(DEF_VOLUME_TYPE, uniformvolume).
 -define(DEF_VOLUME_SIGMA_A, 0.4).
 -define(DEF_VOLUME_SIGMA_S, 0.05).
@@ -584,6 +585,21 @@ command(_Spec, _St) ->
     %% erlang:display({?MODULE,?LINE,_Spec}),
     next.
 
+%%% checking for Material / Light Dialogs support
+has_dialog(Kind) when is_atom(Kind) ->
+    case get_var(dialogs) of
+        false-> false;
+        _ ->
+            %% these are the dialogs handled by the plugin
+            Handled = [material_editor_setup, material_editor_result,
+                       light_editor_setup, light_editor_result],
+            case lists:member(Kind,Handled) of
+                true -> {?__(1,"YafaRay"),?TAG};
+                false -> false
+            end
+    end;
+has_dialog(_) -> false.
+
 dialog({material_editor_setup,Name,Mat}, Dialog) ->
     case is_plugin_active(edit) of
         false -> Dialog;
@@ -752,6 +768,7 @@ material_dialog(_Name, Mat) ->
     DefShaderType = get_pref(shader_type, YafaRay),
     ShaderType = proplists:get_value(shader_type, YafaRay, DefShaderType),
     Object_Type = proplists:get_value(object_type, YafaRay, ?DEF_OBJECT_TYPE),
+    Visibility = proplists:get_value(visibility, YafaRay, ?DEF_VISIBILITY),
     Volume_Type = proplists:get_value(volume_type, YafaRay, ?DEF_VOLUME_TYPE),
     Volume_Sigma_a = proplists:get_value(volume_sigma_a, YafaRay, ?DEF_VOLUME_SIGMA_A),
     Volume_Sigma_s = proplists:get_value(volume_sigma_s, YafaRay, ?DEF_VOLUME_SIGMA_S),
@@ -851,6 +868,11 @@ material_dialog(_Name, Mat) ->
                     wings_dialog:show(?KEY(pnl_volume), Value =:= volume, Store),
                     wings_dialog:show(?KEY(pnl_mesh_light), Value =:= meshlight, Store),
                     wings_dialog:show(?KEY(pnl_lightportal), Value =:= lightportal, Store),
+                    case Value of
+                        lightportal -> wings_dialog:set_value(?KEY(visibility),normal,Store);
+                        _ -> ignore
+                    end,
+                    wings_dialog:enable(?KEY(visibility), Value =/= lightportal, Store),
                     wings_dialog:update(?KEY(pnl_obj_params), Store);
                 ?KEY(volume_type) ->
                     wings_dialog:show(?KEY(pnl_desnity_volume), Value =:= expdensityvolume, Store),
@@ -903,7 +925,7 @@ material_dialog(_Name, Mat) ->
                     wings_dialog:show(?KEY(pnl_on), is_member(Value, [shinydiffuse,glossy,coatedglossy]), Store),
                     %% Fresnel Effect
                     wings_dialog:show(?KEY(pnl_fe), Value =:= shinydiffuse, Store),
-                    %% Ligth Material: Color & Power
+                    %% Light Material: Color & Power
                     wings_dialog:show(?KEY(pnl_lm), Value =:= lightmat, Store),
                     %% Blend: Material 1, Material 2 & Blend Mix
                     wings_dialog:show(?KEY(pnl_bl), Value =:= blend_mat, Store),
@@ -938,7 +960,15 @@ material_dialog(_Name, Mat) ->
                         {?__(32,"Volume"),volume},
                         {?__(33,"Mesh Light"),meshlight},
                         {?__(34,"Light Portal"),lightportal}
-                    ],Object_Type,[key(object_type),{hook,Hook_Show}]}
+                    ],Object_Type,[key(object_type),{hook,Hook_Show}]},
+                    panel,
+                    {label, ?__(108,"Visibility")},
+                    {menu,[
+                        {?__(109,"Normal"),normal},
+                        {?__(110,"No shadows"),no_shadows},
+                        {?__(111,"Shadows only"),shadow_only},
+                        {?__(112,"Invisible"),invisible}
+                    ],Visibility,[key(visibility)]}
                 ]},
                 {hframe, [
                     {hframe, [
@@ -1542,7 +1572,7 @@ modulator_dialog({modulator,Ps}, Maps, M) when is_list(Ps) ->
                                 {?__(94,"Voronoi F3"),voronoi_f3},
                                 {?__(95,"Voronoi F4"),voronoi_f4},
                                 {?__(96,"Voronoi F1F2"),voronoi_f2f1}
-                            ],DistortionType,[key({M,distotion_type})]},
+                            ],DistortionType,[key({M,distortion_type})]},
                             %% End Distorted Noise Type Select
                             {label,?__(107,"Noise Size")},{text,DistortionNoiseSize,[key({M,distortion_noisesize}), range(distortion_noisesize)]},
                             {label,?__(108,"Distortion")},{text,DistortionIntensity,[key({M,distortion_intensity}), range(distortion_intensity)]}
@@ -1586,12 +1616,12 @@ mod_legend(Enabled, Mode, Type) when is_list(Mode), is_list(Type) ->
 
 
 process_modulator(Ps) ->
-    {Modulators,Remaning} =
+    {Modulators,Remaining} =
         lists:foldr(fun(Id, {Mod0,Ps0})->
             {Mod1, Ps1} = modulator_result_find(Ps0, Id, {[],[]}),
             {[{modulator, lists:sort(Mod1)}]++Mod0,Ps1}
         end, {[],Ps}, lists:seq(1,?MAX_MODULATORS)),
-    {[{modulators, Modulators}], Remaning}.
+    {[{modulators, Modulators}], Remaining}.
 
 modulator_result_find([], _, Acc) -> Acc;
 modulator_result_find([{{Id,Field},Value}|Ps], Id, {Mod, Remaining}) ->
@@ -1653,7 +1683,7 @@ modulator_init(Mode) ->
 
 
 %%%
-%%% Ligth dialogs
+%%% Light dialogs
 %%%
 light_dialog(Name, Ps) ->
     OpenGL = proplists:get_value(opengl, Ps, []),
@@ -1667,15 +1697,21 @@ light_dialog(Name, Ps) ->
             _ -> ?DEF_POWER
         end,
     Power = proplists:get_value(power, YafaRay, DefPower),
+    CastShadows = proplists:get_value(cast_shadows, YafaRay, ?DEF_CAST_SHADOWS),
     PowerStr =
-        [{hframe, [
-            {label_column, [
-                {?__(1,"Power"),
-                {text,Power,[key(power),range(power),key(power)]}}
-            ]},
-            panel,
-            help_button({light_dialog,Type})
-        ]}],
+        [{vframe, [
+            {hframe, [
+                {label_column, [
+                    {?__(1,"Power"), {text,Power,[key(power),range(power),key(power)]}}
+                ]},
+                panel,
+                help_button({light_dialog,Type})],[{margin,false}]
+            },
+            {hframe, [
+                {?__(2,"Cast Shadows"),CastShadows,[key(cast_shadows)]}
+            ],[{margin,false}]}
+         ]}
+        ],
     {vframe, PowerStr ++ light_dialog(Name, Type, YafaRay)}.
 
 %%% Point Light Dialog
@@ -1865,9 +1901,9 @@ light_dialog(_Name, infinite, Ps) ->
             {vframe, [
                 %% Sunsky Background
                 {hradio, [
+                    {?__(45,"None"), undefined},
                     {?__(44,"Sunsky"),sunsky},
-                    {?__(46,"Darktide Sunsky"),darksky},
-                    {?__(45,"None"), undefined}
+                    {?__(46,"Darktide Sunsky"),darksky}
                 ],Bg,[key(background),{hook,Hook_Show}]},
                 {vframe, [
                     {hframe, [
@@ -1953,7 +1989,7 @@ light_dialog(_Name, ambient, Ps) ->
     Type = proplists:get_value(type, Ps, ?DEF_AMBIENT_TYPE),
     Samples = proplists:get_value(samples, Ps, ?DEF_SAMPLES),
     Smartibl_blur = proplists:get_value(smartibl_blur, Ps, ?DEF_SMARTIBL_BLUR),
-    
+
     Hook_Enabled =
         fun(Key, Value, Store) ->
             case Key of
@@ -2300,6 +2336,15 @@ export_dialog_qs(Op, Attr) ->
     BrowseProps = [{dialog_type,open_dialog}, {extensions,ImageFormats}],
     FontProps = [{dialog_type,open_dialog}, {extensions,[{".ttf","True Type Fonts"}]}],
 
+    %% this fix wrong setup in old project files
+    case get_pref(save_alpha,Attr) of
+        false ->
+            set_prefs([{background_transp,false},{background_transp_refract,false}]);
+        true ->
+            set_prefs([{background_transp,false}]);
+        _ -> ignore
+    end,
+
     Hook_Enable = fun(Key, Value, Store) ->
         case Key of
             threads_auto ->
@@ -2317,16 +2362,16 @@ export_dialog_qs(Op, Attr) ->
             aperture ->
                 {Value0,_} = f_stop_find(Value,ApertureList),
                 wings_dialog:set_value(aperture_idx, Value0, Store),
-                wings_dialog:enable(bokeh_use_QMC, Value =/= 0.0, Store),
-                wings_dialog:enable(?KEY(pnl_dof_type), Value =/= 0.0, Store),
-                wings_dialog:enable(?KEY(pnl_dof_sliders), Value =/= 0.0, Store);
+                wings_dialog:enable(bokeh_use_QMC, Value =/= +0.0, Store),
+                wings_dialog:enable(?KEY(pnl_dof_type), Value =/= +0.0, Store),
+                wings_dialog:enable(?KEY(pnl_dof_sliders), Value =/= +0.0, Store);
             aperture_idx ->
                 if ((Value =/= "") and (Value =/= Custom)) ->
                         {_,Value0} = f_stop_find(Value,ApertureList),
                         wings_dialog:set_value(aperture, Value0, Store);
                     true -> ok
                 end,
-                Enabled = wings_dialog:get_value(aperture, Store) =/= 0.0,
+                Enabled = wings_dialog:get_value(aperture, Store) =/= +0.0,
                 wings_dialog:enable(bokeh_use_QMC, Enabled, Store),
                 wings_dialog:enable(?KEY(pnl_dof_type), Enabled, Store),
                 wings_dialog:enable(?KEY(pnl_dof_sliders), Enabled, Store);
@@ -2336,7 +2381,7 @@ export_dialog_qs(Op, Attr) ->
     Hook_Show = fun(Key, Value, Store) ->
         case Key of
             lighting_method ->
-                %% 1st collumn of panels
+                %% 1st column of panels
                 %% Direct Light
                 wings_dialog:enable(?KEY(pnl_dl1), wings_dialog:get_value(use_caustics, Store) =:= true, Store),
                 wings_dialog:show(?KEY(pnl_caustics), Value =:= directlighting, Store),
@@ -2347,7 +2392,7 @@ export_dialog_qs(Op, Attr) ->
                 %% SPPM - GI
                 wings_dialog:show(?KEY(pnl_sppm1), Value =:= sppm, Store),
 
-                %% 2rd collumn of panels
+                %% 2nd column of panels
                 %% Direct Light
                 wings_dialog:enable(?KEY(pnl_use_ao), wings_dialog:get_value(do_ao, Store) =:= true, Store),
                 wings_dialog:show(?KEY(pnl_ao), Value =:= directlighting, Store),
@@ -2358,7 +2403,7 @@ export_dialog_qs(Op, Attr) ->
                 %% SPPM - GI
                 wings_dialog:show(?KEY(pnl_sppm2), Value =:= sppm, Store),
 
-                %% 3rd collumn of panels
+                %% 3rd column of panels
                 %% Photon Mapping
                 wings_dialog:enable(?KEY(pnl_use_fg), wings_dialog:get_value(pm_use_fg, Store) =:= true, Store),
                 wings_dialog:show(?KEY(pnl_pm3), Value =:= photonmapping, Store),
@@ -2391,6 +2436,21 @@ export_dialog_qs(Op, Attr) ->
         end
     end,
 
+    Check_bkground = fun(Key, Value, Store) ->
+        case Key of
+            save_alpha ->
+                case Value of
+                    false ->
+                        wings_dialog:set_value(background_transp, false, Store),
+                        wings_dialog:set_value(background_transp_refract, false, Store);
+                    _ ->
+                        wings_dialog:set_value(background_transp, true, Store)
+                end,
+                wings_dialog:enable(background_transp_refract, Value=/=false, Store);
+            background_transp ->
+                wings_dialog:enable(background_transp, false, Store)
+        end
+    end,
 %%     % TO DO: we need changes to wings_dialog code in order to enable this kind of use for buttons
 %%     ButtonsHook = fun(Key,_,_Store) ->
 %%         io:format("Button ~p pressed...\n",[Key])
@@ -2494,13 +2554,13 @@ export_dialog_qs(Op, Attr) ->
                         {?__(23, "Off"), false},
                         {?__(61, "On"), true},
                         {?__(24, "Premultiply"), premultiply}
-                    ], get_pref(save_alpha,Attr), [{key,save_alpha}]},
-                    panel,
-                    {?__(159, "Transp Refraction"),get_pref(background_transp_refract,Attr),
-                        [{key,background_transp_refract}]},
+                    ], get_pref(save_alpha,Attr), [{key,save_alpha},{hook,Check_bkground}]},
                     panel,
                     {?__(161, "Transp Background"),get_pref(background_transp,Attr),
-                        [{key,background_transp}]}
+                        [{key,background_transp},{hook,Check_bkground}]},
+                    panel,
+                    {?__(159, "Transp Refraction"),get_pref(background_transp_refract,Attr),
+                     [{key,background_transp_refract}]}
                 ],[{title, ?__(26, "Background")},{margin,true}]},
 
                 %% Image Autosaving group
@@ -2703,7 +2763,7 @@ export_dialog_qs(Op, Attr) ->
                             {?__( 87, "Radius"),{text,get_pref(sppm_radius,Attr),[range(sppm_radius),{key,sppm_radius}]}}
                         ], [key(pnl_sppm1),{show,false}]},
 
-                        %% 2nd collumn of panels
+                        %% 2nd column of panels
 %                        {vframe, [
                             {vframe, [
                                 {hframe, [
@@ -2747,7 +2807,7 @@ export_dialog_qs(Op, Attr) ->
                             ],[key(pnl_sppm2),{show,false},{margin,false}]},
 %                        ], [{margin,false}]},
 
-                        %% 3rd collumn of panels
+                        %% 3rd column of panels
                         {vframe, [
                             {vframe, [
                                 {vframe,[
@@ -2987,7 +3047,7 @@ build_render_pass_frame(Label, Attr) ->
         end,0, lists:seq(1,Max)),
     Passes =
         case {PassesEnable,(UsedPasses =/= 0)} of
-            {fase,true} -> UsedPasses;
+            {false,true} -> UsedPasses;
             {true,true} -> max(MaxRenderPasses, UsedPasses);
             {true,false} -> MaxRenderPasses;
             _ -> 0
@@ -3141,7 +3201,7 @@ export(Attr, Filename, #e3d_file{objs=Objs,mat=Mats,creator=Creator}) ->
     Lights = proplists:get_value(lights, Attr, []),
     %%
     uniprintln(F,  "<?xml version=\"1.0\"?>~n"++
-                "<!-- ~ts: Exported from ~s -->~n"++
+                "<!-- ~ts: Exported from ~ts -->~n"++
                 "~n"++
                 "<scene type=\"triangle\">", [filename:basename(ExportFile), CreatorChg]),
     %%
@@ -3319,6 +3379,7 @@ export_shader(F, Name, Mat, ExportDir) ->
 export_shinydiffuse_shader(F, Name, Mat, ExportDir, YafaRay) ->
     OpenGL = proplists:get_value(opengl, Mat),
     Maps = proplists:get_value(maps, Mat, []),
+    Visibility = proplists:get_value(visibility, YafaRay, ?DEF_VISIBILITY),
     Modulators = proplists:get_value(modulators, YafaRay, def_modulators(Maps)),
     foldl(fun ({modulator,Ps}=M, N) when is_list(Ps) ->
                   case export_texture(F, [Name,$_,format(N)],
@@ -3405,6 +3466,7 @@ export_shinydiffuse_shader(F, Name, Mat, ExportDir, YafaRay) ->
               (_, N) ->
                   N % Ignore old modulators
           end, 1, Modulators),
+    println(F, "        <visibility sval=\"~s\"/>~n", [Visibility]),
     println(F, "</material>").
 
 
@@ -3415,6 +3477,7 @@ export_shinydiffuse_shader(F, Name, Mat, ExportDir, YafaRay) ->
 export_glossy_shader(F, Name, Mat, ExportDir, YafaRay) ->
     OpenGL = proplists:get_value(opengl, Mat),
     Maps = proplists:get_value(maps, Mat, []),
+    Visibility = proplists:get_value(visibility, YafaRay, ?DEF_VISIBILITY),
     Modulators = proplists:get_value(modulators, YafaRay, def_modulators(Maps)),
     foldl(fun ({modulator,Ps}=M, N) when is_list(Ps) ->
                   case export_texture(F, [Name,$_,format(N)],
@@ -3499,6 +3562,7 @@ export_glossy_shader(F, Name, Mat, ExportDir, YafaRay) ->
               (_, N) ->
                   N % Ignore old modulators
           end, 1, Modulators),
+    println(F, "        <visibility sval=\"~s\"/>~n", [Visibility]),
     println(F, "</material>").
 
 
@@ -3511,6 +3575,7 @@ export_glossy_shader(F, Name, Mat, ExportDir, YafaRay) ->
 export_coatedglossy_shader(F, Name, Mat, ExportDir, YafaRay) ->
     OpenGL = proplists:get_value(opengl, Mat),
     Maps = proplists:get_value(maps, Mat, []),
+    Visibility = proplists:get_value(visibility, YafaRay, ?DEF_VISIBILITY),
     Modulators = proplists:get_value(modulators, YafaRay, def_modulators(Maps)),
     foldl(fun ({modulator,Ps}=M, N) when is_list(Ps) ->
                   case export_texture(F, [Name,$_,format(N)],
@@ -3606,6 +3671,7 @@ export_coatedglossy_shader(F, Name, Mat, ExportDir, YafaRay) ->
               (_, N) ->
                   N % Ignore old modulators
           end, 1, Modulators),
+    println(F, "        <visibility sval=\"~s\"/>~n", [Visibility]),
     println(F, "</material>").
 
 
@@ -3616,6 +3682,7 @@ export_coatedglossy_shader(F, Name, Mat, ExportDir, YafaRay) ->
 export_glass_shader(F, Name, Mat, ExportDir, YafaRay) ->
     OpenGL = proplists:get_value(opengl, Mat),
     Maps = proplists:get_value(maps, Mat, []),
+    Visibility = proplists:get_value(visibility, YafaRay, ?DEF_VISIBILITY),
     Modulators = proplists:get_value(modulators, YafaRay, def_modulators(Maps)),
     foldl(fun ({modulator,Ps}=M, N) when is_list(Ps) ->
                   case export_texture(F, [Name,$_,format(N)],
@@ -3695,6 +3762,7 @@ export_glass_shader(F, Name, Mat, ExportDir, YafaRay) ->
               (_, N) ->
                   N % Ignore old modulators
           end, 1, Modulators),
+    println(F, "        <visibility sval=\"~s\"/>~n", [Visibility]),
     println(F, "</material>").
 
 
@@ -3705,6 +3773,7 @@ export_glass_shader(F, Name, Mat, ExportDir, YafaRay) ->
 export_rough_glass_shader(F, Name, Mat, ExportDir, YafaRay) ->
     OpenGL = proplists:get_value(opengl, Mat),
     Maps = proplists:get_value(maps, Mat, []),
+    Visibility = proplists:get_value(visibility, YafaRay, ?DEF_VISIBILITY),
     Modulators = proplists:get_value(modulators, YafaRay, def_modulators(Maps)),
     foldl(fun ({modulator,Ps}=M, N) when is_list(Ps) ->
                   case export_texture(F, [Name,$_,format(N)],
@@ -3784,6 +3853,7 @@ export_rough_glass_shader(F, Name, Mat, ExportDir, YafaRay) ->
               (_, N) ->
                   N % Ignore old modulators
           end, 1, Modulators),
+    println(F, "        <visibility sval=\"~s\"/>~n", [Visibility]),
     println(F, "</material>").
 
 
@@ -3797,6 +3867,7 @@ export_rough_glass_shader(F, Name, Mat, ExportDir, YafaRay) ->
 export_lightmat_shader(F, Name, Mat, ExportDir, YafaRay) ->
     OpenGL = proplists:get_value(opengl, Mat),
     Maps = proplists:get_value(maps, Mat, []),
+    Visibility = proplists:get_value(visibility, YafaRay, ?DEF_VISIBILITY),
     Modulators = proplists:get_value(modulators, YafaRay, def_modulators(Maps)),
     foldl(fun ({modulator,Ps}=M, N) when is_list(Ps) ->
                   case export_texture(F, [Name,$_,format(N)],
@@ -3846,6 +3917,7 @@ export_lightmat_shader(F, Name, Mat, ExportDir, YafaRay) ->
               (_, N) ->
                   N % Ignore old modulators
           end, 1, Modulators),
+    println(F, "        <visibility sval=\"~s\"/>~n", [Visibility]),
     println(F, "</material>").
 
 
@@ -3896,6 +3968,7 @@ export_shaderblend(F, Name, Mat, ExportDir) ->
 export_blend_mat_shader(F, Name, Mat, ExportDir, YafaRay) ->
     OpenGL = proplists:get_value(opengl, Mat),
     Maps = proplists:get_value(maps, Mat, []),
+    Visibility = proplists:get_value(visibility, YafaRay, ?DEF_VISIBILITY),
     Modulators = proplists:get_value(modulators, YafaRay, def_modulators(Maps)),
     foldl(fun ({modulator,Ps}=M, N) when is_list(Ps) ->
                   case export_texture(F, [Name,$_,format(N)],
@@ -3935,8 +4008,8 @@ export_blend_mat_shader(F, Name, Mat, ExportDir, YafaRay) ->
 
     Blend_Value = proplists:get_value(blend_value, YafaRay, ?DEF_BLEND_VALUE),
 
-    uniprintln(F, "  <material1 sval=\"""w_""\~ts\"/>~n"
-                  "        <material2 sval=\"""w_""\~ts\"/>~n"
+    uniprintln(F, "  <material1 sval=\"w_\~ts\"/>~n"
+                  "        <material2 sval=\"w_\~ts\"/>~n"
                   "        <blend_value fval=\"~.10f\"/>~n",
             [Blend_Mat1,Blend_Mat2,Blend_Value]),
     foldl(fun ({modulator,Ps}=M, N) when is_list(Ps) ->
@@ -3950,6 +4023,7 @@ export_blend_mat_shader(F, Name, Mat, ExportDir, YafaRay) ->
               (_, N) ->
                   N % Ignore old modulators
           end, 1, Modulators),
+    println(F, "        <visibility sval=\"~s\"/>~n", [Visibility]),
     println(F, "</material>").
 
 %%% End Blend Materials Export
@@ -4223,36 +4297,36 @@ export_modulator(F, Texname0, Maps, {modulator,Ps}, _Opacity) when is_list(Ps) -
 
             TextureShaderType =
                 case {Normal,TextureType,AlphaIntensity} of
-                    {0.0,diffusetexture,off} -> "<diffuse_shader";
-                    {0.0,mirrorcolortexture,off} -> "<mirror_color_shader";
-                    {0.0,mirrortexture,off} -> "<mirror_shader";
-                    {0.0,glossytexture,off} -> "<glossy_shader";
-                    {0.0,glossyreflecttexture,off} -> "<diffuse_reflect_shader";
-                    {0.0,transparencytexture,off} -> "<transparency_shader";
-                    {0.0,translucencytexture,off} -> "<translucency_shader";
-                    {0.0,bumptexture,off} -> "<bump_shader";
+                    {+0.0,diffusetexture,off} -> "<diffuse_shader";
+                    {+0.0,mirrorcolortexture,off} -> "<mirror_color_shader";
+                    {+0.0,mirrortexture,off} -> "<mirror_shader";
+                    {+0.0,glossytexture,off} -> "<glossy_shader";
+                    {+0.0,glossyreflecttexture,off} -> "<diffuse_reflect_shader";
+                    {+0.0,transparencytexture,off} -> "<transparency_shader";
+                    {+0.0,translucencytexture,off} -> "<translucency_shader";
+                    {+0.0,bumptexture,off} -> "<bump_shader";
 
-                    {0.0,diffusetexture,transparency} -> "<transparency_shader";
-                    {0.0,mirrorcolortexture,transparency} -> "<transparency_shader";
-                    {0.0,mirrortexture,transparency} -> "<transparency_shader";
-                    {0.0,glossytexture,transparency} -> "<transparency_shader";
-                    {0.0,glossyreflecttexture,transparency} -> "<transparency_shader";
-                    {0.0,transparencytexture,transparency} -> "<transparency_shader";
+                    {+0.0,diffusetexture,transparency} -> "<transparency_shader";
+                    {+0.0,mirrorcolortexture,transparency} -> "<transparency_shader";
+                    {+0.0,mirrortexture,transparency} -> "<transparency_shader";
+                    {+0.0,glossytexture,transparency} -> "<transparency_shader";
+                    {+0.0,glossyreflecttexture,transparency} -> "<transparency_shader";
+                    {+0.0,transparencytexture,transparency} -> "<transparency_shader";
 
-                    {0.0,diffusetexture,diffusealphatransparency} -> "<diffuse_shader";
-                    {0.0,transparencytexture,diffusealphatransparency} -> "<diffuse_shader";
+                    {+0.0,diffusetexture,diffusealphatransparency} -> "<diffuse_shader";
+                    {+0.0,transparencytexture,diffusealphatransparency} -> "<diffuse_shader";
 
-                    {0.0,diffusetexture,translucency} -> "<translucency_shader";
-                    {0.0,glossytexture,translucency} -> "<translucency_shader";
-                    {0.0,translucencytexture,translucency} -> "<translucency_shader";
+                    {+0.0,diffusetexture,translucency} -> "<translucency_shader";
+                    {+0.0,glossytexture,translucency} -> "<translucency_shader";
+                    {+0.0,translucencytexture,translucency} -> "<translucency_shader";
 
-                    {0.0,diffusetexture,specularity} -> "<mirror_shader";
-                    {0.0,mirrorcolortexture,specularity} -> "<mirror_shader";
-                    {0.0,mirrortexture,specularity} -> "<mirror_shader";
-                    {0.0,glossytexture,specularity} -> "<mirror_shader";
-                    {0.0,glossyreflecttexture,specularity} -> "<mirror_shader";
+                    {+0.0,diffusetexture,specularity} -> "<mirror_shader";
+                    {+0.0,mirrorcolortexture,specularity} -> "<mirror_shader";
+                    {+0.0,mirrortexture,specularity} -> "<mirror_shader";
+                    {+0.0,glossytexture,specularity} -> "<mirror_shader";
+                    {+0.0,glossyreflecttexture,specularity} -> "<mirror_shader";
 
-                    {0.0,diffusetexture,stencil} -> "<diffuse_shader";
+                    {+0.0,diffusetexture,stencil} -> "<diffuse_shader";
                     _ -> "<bump_shader"
                 end,
 
@@ -4411,7 +4485,6 @@ export_object_1(F, NameStr, Mesh0=#e3d_mesh{he=He0}, DefaultMaterial, MatPs, Id)
                                         true -> ?DEF_AUTOSMOOTH end),
 
 
-
     %% Pre-process mesh
     Mesh1 = #e3d_mesh{} =
         case {He0,UseHardness} of
@@ -4516,6 +4589,8 @@ export_object_1(F, NameStr, Mesh0=#e3d_mesh{he=He0}, DefaultMaterial, MatPs, Id)
             println(F, "<with_diffuse bval=\"~s\"/>",[Lightportal_Diffusephotons]),
             println(F, "<with_caustic bval=\"~s\"/>",[Lightportal_Causticphotons]),
             println(F, "<photon_only bval=\"~s\"/>",[Lightportal_Photon_Only]),
+            println(F, "</light>"),
+            println(F, "<mesh id=\"~w\" vertices=\"~w\" faces=\"~w\" has_uv=\"~s\" type=\"256\">",[Id,length(Vs),length(Fs),HasUV]),
             println(F," ")
 
     end,
@@ -4556,7 +4631,7 @@ export_object_1(F, NameStr, Mesh0=#e3d_mesh{he=He0}, DefaultMaterial, MatPs, Id)
 
         lightportal ->
             println(F," "),
-            println(F, "</light>"),
+            println(F, "</mesh>"),
             println(F," ")
     end,
 
@@ -4655,7 +4730,7 @@ export_faces(F, [#e3d_face{mat=[Mat|_],tx=Tx,vs=[A,B,C],vc=VCols}|T],
                              [length(VCols)]),
                    ""
            end,
-    uniprintln(F, "~s    <f a=\"~s\" b=\"~s\" c=\"~s\"~s~s",
+    uniprintln(F, "~ts    <f a=\"~s\" b=\"~s\" c=\"~s\"~s~s",
                [Shader,format(A),format(B),format(C),UVIndices,VCol]),
 
 
@@ -4681,14 +4756,12 @@ export_light(F, Name, point, OpenGL, YafaRay) ->
     Position = proplists:get_value(position, OpenGL, {0.0,0.0,0.0}),
     Diffuse = proplists:get_value(diffuse, OpenGL, {1.0,1.0,1.0,1.0}),
     Type = proplists:get_value(type, YafaRay, ?DEF_POINT_TYPE),
+    CastShadows = proplists:get_value(cast_shadows, YafaRay, ?DEF_CAST_SHADOWS),
     uniprintln(F,"<light name=\"~ts\"> <type sval=\"~w\"/>  <power fval=\"~.3f\"/> ",
             [Name,Type,Power]),
     case Type of
         pointlight ->
-            CastShadows =
-                proplists:get_value(cast_shadows, YafaRay, ?DEF_CAST_SHADOWS),
-            println(F,"       <cast_shadows bval=\"~s\"/>", [format(CastShadows)]);
-
+            ignore;
         spherelight ->
             ArealightRadius =
                 proplists:get_value(arealight_radius, YafaRay,
@@ -4707,6 +4780,7 @@ export_light(F, Name, point, OpenGL, YafaRay) ->
     export_pos(F, from, Position),
     export_rgb(F, color, Diffuse),
 
+    println(F,"       <cast_shadows bval=\"~s\"/>", [format(CastShadows)]),
     println(F, "</light>"),
     undefined;
 
@@ -4720,6 +4794,7 @@ export_light(F, Name, infinite, OpenGL, YafaRay) ->
     Diffuse = proplists:get_value(diffuse, OpenGL, {1.0,1.0,1.0,1.0}),
     SunSamples = proplists:get_value(sun_samples, YafaRay, ?DEF_SUN_SAMPLES),
     SunAngle = proplists:get_value(sun_angle, YafaRay, ?DEF_SUN_ANGLE),
+    CastShadows = proplists:get_value(cast_shadows, YafaRay, ?DEF_CAST_SHADOWS),
 
     %% Directional Infinite Light Start
     case Type of
@@ -4744,6 +4819,7 @@ export_light(F, Name, infinite, OpenGL, YafaRay) ->
 
             export_pos(F, direction, Position),
             export_rgb(F, color, Diffuse),
+            println(F," <cast_shadows bval=\"~s\"/>", [format(CastShadows)]),
             println(F, "</light>"),
             Bg;
 
@@ -4759,6 +4835,7 @@ export_light(F, Name, infinite, OpenGL, YafaRay) ->
 
             export_pos(F, direction, Position),
             export_rgb(F, color, Diffuse),
+            println(F," <cast_shadows bval=\"~s\"/>", [format(CastShadows)]),
             println(F, "</light>"),
             Bg;
 
@@ -4776,6 +4853,7 @@ export_light(F, Name, spot, OpenGL, YafaRay) ->
     ConeAngle = proplists:get_value(cone_angle, OpenGL, ?DEF_CONE_ANGLE),
     Diffuse = proplists:get_value(diffuse, OpenGL, {1.0,1.0,1.0,1.0}),
     Type = proplists:get_value(type, YafaRay, ?DEF_SPOT_TYPE),
+    CastShadows = proplists:get_value(cast_shadows, YafaRay, ?DEF_CAST_SHADOWS),
     uniprintln(F,"<light name=\"~ts\"> <power fval=\"~.3f\"/> ",
                [Name,Power]),
     case Type of
@@ -4790,15 +4868,13 @@ export_light(F, Name, spot, OpenGL, YafaRay) ->
             SpotIESSamples = proplists:get_value(spot_ies_samples, YafaRay,
                                                  ?DEF_SPOT_IES_SAMPLES),
 
-            CastShadows =
-                proplists:get_value(cast_shadows, YafaRay, ?DEF_CAST_SHADOWS),
             SpotExponent =
                 proplists:get_value(spot_exponent, OpenGL, ?DEF_SPOT_EXPONENT),
             SpotBlend = proplists:get_value(spot_blend, YafaRay, ?DEF_SPOT_BLEND),
             SpotFuzzyness = proplists:get_value(spot_fuzzyness, YafaRay, ?DEF_SPOT_FUZZYNESS),
-            print(F, "<type sval=\"spotlight\"/> <cast_shadows bval=\"~s\"/> <photon_only bval=\"~s\"/> <cone_angle fval=\"~.3f\"/>~n"++
+            print(F, "<type sval=\"spotlight\"/> <photon_only bval=\"~s\"/> <cone_angle fval=\"~.3f\"/>~n"++
             "       <beam_falloff fval=\"~.10f\"/> <blend fval=\"~.3f\"/> <soft_shadows bval=\"~s\"/> <shadowFuzzyness fval=\"~.3f\"/> <samples ival=\"~w\"/>",
-                [format(CastShadows), SpotPhotonOnly, ConeAngle, SpotExponent, SpotBlend,SpotSoftShadows,SpotFuzzyness,SpotIESSamples]);
+                [SpotPhotonOnly, ConeAngle, SpotExponent, SpotBlend,SpotSoftShadows,SpotFuzzyness,SpotIESSamples]);
 
         spot_ies ->
 
@@ -4819,15 +4895,16 @@ export_light(F, Name, spot, OpenGL, YafaRay) ->
     export_pos(F, from, Position),
     export_pos(F, to, AimPoint),
     export_rgb(F, color, Diffuse),
+    println(F," <cast_shadows bval=\"~s\"/>", [format(CastShadows)]),
     println(F, "</light>"),
     undefined;
 
 %% Export Ambient Light
-
 export_light(F, Name, ambient, _OpenGL, YafaRay) ->
     Type = proplists:get_value(type, YafaRay, ?DEF_AMBIENT_TYPE),
     Power = proplists:get_value(power, YafaRay, ?DEF_POWER),
     Bg = proplists:get_value(background, YafaRay, ?DEF_BACKGROUND_AMBIENT),
+    CastShadows = proplists:get_value(cast_shadows, YafaRay, ?DEF_CAST_SHADOWS),
     case Type of
         hemilight when Power > 0.0 ->
             println(F,"",
@@ -4914,6 +4991,7 @@ export_light(F, Name, ambient, _OpenGL, YafaRay) ->
                             [Maxdistance]);
                 false -> ok
             end,
+            println(F," <cast_shadows bval=\"~s\"/>", [format(CastShadows)]),
             println(F, "</light>"),
             Bg;
         pathlight -> Bg;
@@ -4934,6 +5012,7 @@ export_light(F, Name, ambient, _OpenGL, YafaRay) ->
             println(F,"       photons ival=\"~w\" radius=\"~.3f\" "
                     "depth=\"~w\" search=\"~w\">",
                     [GplPhotons,GplRadius,GplDepth,GplSearch]),
+            println(F," <cast_shadows bval=\"~s\"/>", [format(CastShadows)]),
             println(F, "</light>"),
             Bg
     end;
@@ -4948,6 +5027,7 @@ export_light(F, Name, area, OpenGL, YafaRay) ->
     Samples = proplists:get_value(arealight_samples, YafaRay,
                                   ?DEF_AREALIGHT_SAMPLES),
     Dummy = proplists:get_value(dummy, YafaRay, ?DEF_DUMMY),
+    CastShadows = proplists:get_value(cast_shadows, YafaRay, ?DEF_CAST_SHADOWS),
     Fs = foldr(fun (Face, Acc) ->
                        e3d_mesh:quadrangulate_face(Face, Vs)++Acc
                end, [], Fs0),
@@ -4977,6 +5057,7 @@ export_light(F, Name, area, OpenGL, YafaRay) ->
                       export_pos(F, from, B),
                       export_pos(F, point1, C),
                       export_pos(F, point2, D),
+                      println(F," <cast_shadows bval=\"~s\"/>", [format(CastShadows)]),
                       println(F, "</light>"),
                       I+1
               end
@@ -5102,6 +5183,7 @@ export_background(F, Name, Ps) ->
     OpenGL = proplists:get_value(opengl, Ps, []),
     YafaRay = proplists:get_value(?TAG, Ps, []),
     Bg = proplists:get_value(background, YafaRay, ?DEF_BACKGROUND_AMBIENT),
+    CastShadows = proplists:get_value(cast_shadows, YafaRay, ?DEF_CAST_SHADOWS),
     case Bg of
 %% Constant Background Export
         constant ->
@@ -5113,7 +5195,7 @@ export_background(F, Name, Ps) ->
 
             AmbientCausticPhotons = proplists:get_value(ambient_causticphotons, YafaRay, ?DEF_AMBIENT_CAUSTICPHOTONS),
 
-            print(F, "<background name=\"~ts\">",
+            uniprintln(F, "<background name=\"~ts\">",
                 [Name]),
 
             println(F, "<type sval=\"~s\"/>",
@@ -5138,7 +5220,6 @@ export_background(F, Name, Ps) ->
             end,
 
 %% Add Enlight Constant Background End
-
 
 
             println(F, "<power fval=\"~w\"/>~n",
@@ -5471,6 +5552,7 @@ export_background(F, Name, Ps) ->
 
             println(F, "    <texture sval=\"world_texture\" />")
     end,
+    println(F, "    <cast_shadows bval=\"~s\"/>", [format(CastShadows)]),
     println(F, "</background>").
 
 
@@ -5796,8 +5878,8 @@ export_logging_badge(F, Attr) ->
     Badge_font_size_factor = proplists:get_value(badge_font_size_factor, Attr),
     
     println(F, "<logging_badge name=\"logging_badge\">"),
-    println(F, "	<logging_saveLog bval=\"~s\"/>", [LogSaveTxt]),
-    println(F, "	<logging_saveHTML bval=\"~s\"/>", [LogSaveHtml]),
+    println(F, "	<logging_saveLog bval=\"~ts\"/>", [LogSaveTxt]),
+    println(F, "	<logging_saveHTML bval=\"~ts\"/>", [LogSaveHtml]),
     println(F, "	<logging_paramsBadgePosition sval=\"~s\"/>", [BadgePosition]),
     uniprintln(F, " <logging_title sval=\"~ts\"/>", [BadgeTitle]),
     uniprintln(F, "	<logging_author sval=\"~ts\"/>", [BadgeAuthor]),
@@ -5900,7 +5982,7 @@ format(L) when is_list(L) ->
 format_decimals(F) when is_float(F), F >= 0.0 ->
     format_decimals_1(F).
 
-format_decimals_1(0.0) ->
+format_decimals_1(+0.0) ->
     ".0";
 format_decimals_1(F) when is_float(F) ->
     G = 10.0 * F,
@@ -5908,7 +5990,7 @@ format_decimals_1(F) when is_float(F) ->
     D = G - float(I),
     [$.,(I+$0)|format_decimals_2(D)].
 
-format_decimals_2(0.0) ->
+format_decimals_2(+0.0) ->
     [];
 format_decimals_2(F) when is_float(F) ->
     G = 100.0 * F,
@@ -5920,7 +6002,7 @@ format_decimals_2(F) when is_float(F) ->
             [integer_to_list(I)|format_decimals_3(D)]
     end.
 
-format_decimals_3(0.0) ->
+format_decimals_3(+0.0) ->
     [];
 format_decimals_3(F) when is_float(F) ->
     G = 1000.0 * F,
@@ -5934,7 +6016,7 @@ format_decimals_3(F) when is_float(F) ->
             [integer_to_list(I)|format_decimals_4(D)]
     end.
 
-format_decimals_4(0.0) ->
+format_decimals_4(+0.0) ->
     [];
 format_decimals_4(F) when is_float(F) ->
     G = 10000.0 * F,
@@ -6101,7 +6183,12 @@ help(text, {material_dialog,object}) ->
       "Apply to a flat plane. Light Portals are used to reduce render times."),
     ?__(12,"Autosmooth Angle: Controls YafaRay simulated smoothing of a mesh. "
       "For best results, adjust the Subdivisions setting under YafaRay Render "
-      "Options to control real mesh smoothing.")];
+      "Options to control real mesh smoothing."),
+    [{bold,?__(100,"Material Visibity")}],
+    [{bullet,[?__(101,"Normal: visible and casting shadows."),
+              ?__(102,"No shadows: visible but not casting shadows."),
+              ?__(103,"Shadows only: invisible but casting shadows."),
+              ?__(104,"Invisible: totally invisible material.")]}]];
 %%help(title, {material_dialog,fresnel}) ->
 %%    ?__(15,"YafaRay Material Properties: Fresnel Parameters");
 %%help(text, {material_dialog,fresnel}) ->
@@ -6164,7 +6251,7 @@ help(text,{light,ambient}) ->
 help(text,{light,area}) ->
     [[{bold,?__(80,"Area Light")}],
         ?__(81,"A rectangular light with rays emitting from the entire surface. Use for "
-        "light coming through a window or florescent ceiling lights.\n"
+        "light coming through a window or fluorescent ceiling lights.\n"
         "Wings3D objects can be converted to Area Lights with the Object to Area Light "
         "command. Expect longer render times when using Area Lights.")];
 

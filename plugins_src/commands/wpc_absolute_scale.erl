@@ -16,8 +16,6 @@
 
 -export([init/0,menu/2,command/2]).
 
--define(EPSILON,0.0000005).
-
 %%%
 %%% plugin interface
 %%%
@@ -135,7 +133,7 @@ getSuggestedCenter([{AX1,AY1,AZ1},{AX2,AY2,AZ2}],
      getC(AY1,AY2,BY1,BY2),
      getC(AZ1,AZ2,BZ1,BZ2)}.
 
-getC(A1, A2, B1, B2) when A1 =/= A2, B1 =/= B2, ((A1 - A2)-(B1 - B2))=/=0.0 ->
+getC(A1, A2, B1, B2) when A1 =/= A2, B1 =/= B2, abs((A1 - A2)-(B1 - B2)) > ?EPSILON ->
     (B1*A2-B2*A1)/((A2-A1) - (B2-B1));
 getC(A1, A2, _, _) -> (A1+A2)/2.
 

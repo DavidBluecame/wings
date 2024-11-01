@@ -1,0 +1,122 @@
+on:
+    push:
+    pull_request:
+
+concurrency:
+  group: ci-${{github.actor}}-${{github.head_ref || github.run_number}}-${{github.ref}}-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name:  Build Wings3D (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      # Fetch the commits and hopefully get nice version via git describe
+      - uses: actions/checkout@v4
+        with:
+         fetch-depth: 1
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.1'
+          rebar3-version: '3.24'
+
+      - name: Install OpenCL deps
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev
+
+      - name: Wings build
+        run:
+          MAKEFLAGS=-j$(($(nproc) + 2)) make
+
+      - name: Dialyze
+        run: make dialyze
+
+      - name: Build installer
+        run: make unix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wings_ubuntu
+          compression-level: 0
+          path: wings-*.bzip2.run
+
+  build-windows:
+    defaults:
+      run:
+        shell: wsl-bash {0}
+    name: Build Wings3D (Windows)
+    runs-on: windows-2022
+
+    steps:
+      - uses: Vampire/setup-wsl@v3
+        with:
+          distribution: Ubuntu-22.04
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install winget
+        uses: Cyberboss/install-winget@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download win32 Erlang
+        shell: cmd
+        run: |
+          winget install --id=Erlang.ErlangOTP -v "27.0" -e --accept-source-agreements
+
+##        NSIS is already pre-installed
+##        winget install --verbose -y nsis
+
+      - name: Prepare WSL for compilation
+        run: |
+             # Need rebar3 and erlang in linux
+             # Since I don't know how to invoke an cmd with visual studio env
+             # to invoke rebar3 from windows
+             #
+             mkdir bin
+             wget -q -O bin/rebar3 https://github.com/erlang/rebar3/releases/download/3.22.0/rebar3
+             chmod +x bin/rebar3
+             #
+             # We need erlang (for rebar3), make and unzip
+             #
+             sudo apt-get update
+             sudo apt-get install -y erlang-dev erlang-ssh erlang-inets unzip build-essential
+             #
+             # wings need opencl libs and headers
+             #
+             mkdir OpenCL
+             cd OpenCL
+             wget https://github.com/GPUOpen-LibrariesAndSDKs/OCL-SDK/files/1406216/lightOCLSDK.zip
+             unzip lightOCLSDK.zip
+             mv lib/x86_64 lib/x64
+
+      - name: Build wings
+        run: |
+             echo PWD: `pwd`
+             export WINGS_DIR_WSL=`pwd`
+             export WINGS_DIR_WIN=`wslpath -m $WINGS_DIR_WSL`
+             export OPENCL_DIR=$WINGS_DIR_WIN/OpenCL
+             export MAKEFLAGS=-j$(($(nproc) + 2))
+             echo MAKEFLAGS=$MAKEFLAGS
+             #
+             #  Setup paths to find cl.exe and msw LIBS and INCLUDES
+             #
+             cd /mnt/c
+             eval `cmd.exe /c "$WINGS_DIR_WIN/win32/SetupWSLcross.bat" x64`
+             cd $WINGS_DIR_WSL
+             #
+             export PATH=$PATH:"/mnt/c/Program Files/Erlang OTP/bin:$WINGS_DIR_WSL/bin"
+             make
+             export WINGS_VCREDIST_IGNORE_VSN=1
+             make win32
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wings_win32_x64_installer
+          compression-level: 0
+          path: wings-*.exe
+
+
+

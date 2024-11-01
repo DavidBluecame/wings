@@ -133,7 +133,7 @@ rename({_,OldName}=Id) ->
               {label,OldName}]},
             {hframe,[
               {label,?__(3,"New name")++": "},
-              {text,"",[]}]}
+              {text,OldName,[{width,22}]}]}
            ]}],
     wings_dialog:dialog(?__(1,"Rename"), Qs,
     fun([[]]) -> ignore;
@@ -327,7 +327,7 @@ reset_selection(false, _) -> ok;
 reset_selection(true, LC) ->
     Sel = wxListCtrl:getNextItem(LC, -1, [{state,?wxLIST_STATE_SELECTED}]),
     if Sel >= 0 ->
-	%% remove any selection so the context menues can be properly processed
+	%% remove any selection so the context menus can be properly processed
 	wxListCtrl:setItemState(LC, Sel, 0, ?wxLIST_STATE_SELECTED);
 	true -> ok
     end.

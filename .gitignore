@@ -38,6 +38,8 @@
 /c_src/*.o
 /c_src/*.obj
 /c_src/*.pdb
+/c_src/tess/*.o
+/c_src/tess/*.obj
 
 # /plugins/
 /plugins/*
@@ -62,6 +64,7 @@
 /wings-*
 /build/*
 /macosx/build/*
+/macosx/Info.plist
 /win32/Wings3D.exe
 /win32/wings3d_res.o
 /win32/wings3d.obj
@@ -75,5 +78,3 @@
 
 # Emacs Tag files
 TAGS
-
-# 

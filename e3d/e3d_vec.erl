@@ -45,7 +45,7 @@ zero() ->
 
 -spec is_zero(vector()) -> boolean().
      
-is_zero({0.0,0.0,0.0}) -> true;
+is_zero({+0.0,+0.0,+0.0}) -> true;
 is_zero(_) -> false.
 
 -spec add(vector(), vector()) -> vector().
@@ -341,7 +341,7 @@ line_dist_sqr(P,A,B) ->
 %%      Pb = P3 + mub (P4 - P3)
 %%   Return FALSE if no solution exists.
 %% (from http://paulbourke.net/geometry/pointlineplane/)
--define(EPS, 0.000001).
+-define(EPS, ?EPSILON).
 -spec line_line_intersect(point(),point(),point(),point()) ->
                                  false | {point(), point(), float(), float()}.
 line_line_intersect(P1,P2,P3,P4) ->

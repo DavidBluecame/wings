@@ -833,12 +833,12 @@ renumber_face([#e3d_face{vs=Vs0, vc=Vc0, tx=Tx0, ns=Ns0}=F0|Fs], NVs, NVc, NTx, 
 renumber_face([], _NVs, _NVc, _NTx, _NNs, Acc) ->
     Acc.
 
-make_matrix({rotate, [_,_,_,0.0]}, M) ->
+make_matrix({rotate, [_,_,_,+0.0]}, M) ->
     M;
 make_matrix({rotate, [X,Y,Z,Rad]}, M) ->
     Deg = Rad*180.0/math:pi(),
     e3d_mat:mul(e3d_mat:rotate(Deg, {X,Y,Z}), M);
-make_matrix({translate, [0.0,0.0,0.0]}, M) ->
+make_matrix({translate, [+0.0,+0.0,+0.0]}, M) ->
     M;
 make_matrix({translate, [X,Y,Z]}, M) ->
     e3d_mat:mul(e3d_mat:translate(X,Y,Z), M);
@@ -899,7 +899,7 @@ test() ->
 -endif.
 
 %%%%
-%%%%   Provisory convertion from UTF16/32 - it make possible load a file
+%%%%   Provisory conversion from UTF16/32 - it make possible load a file
 %%%%   which materials name/id uses unicode
 %%%%   reported in: http://www.wings3d.com/forum/showthread.php?tid=2321
 atom_name(Name) ->

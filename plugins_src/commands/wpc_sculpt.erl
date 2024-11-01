@@ -325,9 +325,8 @@ draw_magnet(X, Y, #sculpt{rad=Rad,str=Str,st=#st{shapes=Shs}=St}) ->
     P = Str*10,
     wings_io:set_color({1.0*P,0.0,1.0/P,0.1}),
     gl:translatef(Xm, Ym, Zm),
-    Obj = glu:newQuadric(),
-    glu:sphere(Obj, Rad, 40, 40),
-    glu:deleteQuadric(Obj),
+    #{size:=Size, tris:=Tris} = wings_shapes:tri_sphere(#{subd=>4, scale=> Rad, binary => true}),
+    wings_vbo:draw(fun(_) -> gl:drawArrays(?GL_TRIANGLES, 0, Size*3) end, Tris),
     gl:popAttrib().
 
 dist_along_vector({Xa,Ya,Za},{Xb,Yb,Zb},{Vx,Vy,Vz}) ->
@@ -672,7 +671,7 @@ constraint_check({X1,Y1,Z1}=OrigPos, {X2,Y2,Z2}=NewPos) ->
 intersect_vec_plane(PosA, PosB, Plane, Vec) ->
 %% Return point where Vec through PosA intersects with Plane at PosB
     case e3d_vec:dot(Vec,Plane) of
-      0.0 ->
+      Dot when abs(Dot) < ?EPSILON ->
         Intersection = e3d_vec:dot(e3d_vec:sub(PosB, PosA), Plane),
         e3d_vec:add(PosB, e3d_vec:mul(Plane, Intersection));
       Dot ->
@@ -1161,8 +1160,8 @@ draw(plain, DrawEdges, _D, SelMode, RS) ->
     wings_dl:call(DrawEdges, RS);
 draw(_,_,_,_, RS) -> RS.
 
-edge_width(edge) -> wings_pref:get_value(edge_width);
-edge_width(_) -> 1.
+edge_width(edge) -> float(wings_pref:get_value(edge_width));
+edge_width(_) -> 1.0.
 
 col_to_vec({R,G,B}) when is_integer(R) -> {R/255.0,G/255.0,B/255.0};
 col_to_vec({_,_,_}=Col) -> Col;

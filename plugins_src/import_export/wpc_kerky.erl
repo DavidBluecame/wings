@@ -11,7 +11,7 @@
 
 -module(wpc_kerky).
 
--export([init/0,menu/2,command/2,dialog/2]).
+-export([init/0,menu/2,command/2,has_dialog/1,dialog/2]).
 
 -include_lib("wings/e3d/e3d.hrl").
 -include_lib("wings/e3d/e3d_image.hrl").
@@ -73,7 +73,7 @@ init() ->
     set_var(rendering, false),
     true.
 
-%%% retrieve plugin preferences from prefernce file and store as global variables
+%%% retrieve plugin preferences from preference file and store as global variables
 init_pref() ->
     case is_windows() of
         true-> LocalRenderer = ?DEF_RENDERER;
@@ -171,6 +171,21 @@ command({edit,{plugin_preferences,?TAG}}, St) ->
     pref_dialog(St);
 command(_Spec, _St) ->
     next.
+
+%%% checking for Material / Light Dialogs support
+has_dialog(Kind) when is_atom(Kind) ->
+    case get_var(dialogs) of
+        false-> false;
+        _ ->
+            %% these are the dialogs handled by the plugin
+            Handled = [material_editor_setup, material_editor_result,
+                       light_editor_setup, light_editor_result],
+            case lists:member(Kind,Handled) of
+                true -> {?__(1,"Kerkythea"),?TAG};
+                false -> false
+            end
+    end;
+has_dialog(_) -> false.
 
 %%% Material / Light Dialogs
 dialog({material_editor_setup, Name, Mat}, Dialog) ->
@@ -1972,8 +1987,8 @@ all_zero(InTuple) when is_tuple(InTuple)->
 all_zero([])->
     true;
 all_zero([InVal | InList]) when is_list(InList)->
-    case InVal of
-        0.0 -> all_zero(InList);
+    case abs(InVal) of
+        +0.0 -> all_zero(InList);
         0 -> all_zero(InList);
         _ -> false
     end.

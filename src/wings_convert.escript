@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 %%   -*- erlang -*-
-%%     Wings 3D File convertion.
+%%     Wings 3D File conversion.
 %%
 %%  Copyright (c) 2010 Dan Gudmundsson
 %%
@@ -14,14 +14,14 @@
 -define(WINGS_DIR, "c:/src/wings/ebin").
 
 -record(opts,
-	{dir = ".",       %% Ouput to directory
+	{dir = ".",       %% Output to directory
 	 out_module,      %% Output format
 	 verbose=false,   %% Verbose output
 	 in_format,       %% In format (if unknown extension).
 	 image_format,    %% Image out format
 	 in_formats=[],   %% Scanned, all import formats
 	 out_formats=[],  %% Scanned, all export formats
-	 modify=[]        %% Convertion modifications
+	 modify=[]        %% Conversion modifications
 	}).
 
 -record(format,

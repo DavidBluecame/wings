@@ -22,7 +22,7 @@
 	 update/2,update_filename/2,find_image/2,
 	 window/1, debug_display/2]).
 -export([image_formats/0,image_read/1,image_write/1,
-	 e3d_to_wxImage/1, wxImage_to_e3d/1]).
+	 e3d_to_wxImage/1, wxImage_to_e3d/1, resize_image/3]).
 -export([maybe_exceds_opengl_caps/1]).
 
 -behavior(gen_server).
@@ -173,7 +173,7 @@ screenshot([SaveView,Name], St) ->
       true -> wings_view:command({views,{save,[Name]}},St);
       false -> St
     end;
-screenshot(Name, St) ->
+screenshot([Name], St) ->
     viewport_screenshot(Name),
     St.
 
@@ -327,7 +327,14 @@ handle_call({update,Id,Image}, _From, S) ->
     end;
 handle_call({find_image, Dir, File}, _From, #ist{images=Ims}=S) ->
     AbsName = filename:join(Dir, File),
-    Find = fun(Fn) -> Fn == AbsName end,
+    Find = case os:type() of
+               {win32, _} ->
+                   fun(none) -> false;
+                      (Fn) -> string:casefold(Fn) == string:casefold(AbsName) 
+                   end;
+               _ ->
+                   fun(Fn) -> Fn == AbsName end
+           end,
     Found = [Id || {Id, #img{e3d=#e3d_image{filename=FN}}} <-
                        gb_trees:to_list(Ims), Find(FN)],
     case Found of
@@ -626,19 +633,12 @@ maybe_exceds_opengl_caps(#e3d_image{width=W0,height=H0}=Image) ->
 
 resize_image(#e3d_image{width=W0,height=H0}=Image, W0, H0) ->
     Image;
-resize_image(#e3d_image{width=W0,height=H0,bytes_pp=BytesPerPixel,
-                        image=Bits0}=Image, W, H) ->
-    Out = wings_io:get_buffer(BytesPerPixel*W*H, ?GL_UNSIGNED_BYTE),
-    {Format, ?GL_UNSIGNED_BYTE} = texture_format(Image),
-    GlErr =glu:scaleImage(Format, W0, H0, ?GL_UNSIGNED_BYTE,
-        Bits0, W, H, ?GL_UNSIGNED_BYTE, Out),
-    case GlErr of
-        0 ->
-            Bits = wings_io:get_bin(Out),
-            Image#e3d_image{width=W,height=H,bytes_pp=BytesPerPixel,image=Bits};
-        _ ->
-            {error,GlErr}
-    end.
+resize_image(#e3d_image{type=OrigType}=Orig, W, H) ->
+    Image = e3d_to_wxImage(Orig),
+    wxImage:rescale(Image, W, H, [{quality, ?wxIMAGE_QUALITY_HIGH}]),
+    ScaledE3d = wxImage_to_e3d(Image),
+    wxImage:destroy(Image),
+    e3d_image:convert(ScaledE3d, OrigType).
 
 need_resize_image(W, H, Max) when W > Max; H > Max ->
     true;
@@ -880,14 +880,16 @@ e3d_to_wxImage_1(I = #e3d_image{bytes_pp=1, width=W, height=H}) ->
     wxImage:new(W,H,RGB);
 e3d_to_wxImage_1(I = #e3d_image{type=r32g32b32f, width=W, height=H}) ->
     #e3d_image{image=RGBf} = e3d_image:convert(I, r32g32b32f, 1, upper_left),
-    RGB8 = << <<(max(1.0, abs(C))*255)>> || <<C:32/float>> <= RGBf >>,
+    RGB8 = << << (trunc(max(1.0, abs(C))*255)) >> || <<C:32/float>> <= RGBf >>,
     wxImage:new(W,H,RGB8);
 e3d_to_wxImage_1(I = #e3d_image{type=r32g32b32a32f, width=W, height=H}) ->
     #e3d_image{image=RGBf} = e3d_image:convert(I, r32g32b32a32f, 1, upper_left),
-    RGB8 = << <<(max(1.0, abs(R))*255),(max(1.0, abs(G))*255),(max(1.0, abs(B))*255)>>
+    RGB8 = << << (trunc(max(1.0, abs(R))*255)),
+                 (trunc(max(1.0, abs(G))*255)),
+                 (trunc(max(1.0, abs(B))*255)) >>
               || <<R:32/float,G:32/float,B:32/float,_:32/float>> <= RGBf >>,
     Wx = wxImage:new(W,H,RGB8),
-    Alpha = << <<(max(1.0, abs(A))*255)>> || <<_:12/binary,A:32/float>> <= RGBf >>,
+    Alpha = << << (trunc(max(1.0, abs(A))*255)) >> || <<_:12/binary,A:32/float>> <= RGBf >>,
     wxImage:setAlpha(Wx, Alpha),
     Wx.
 

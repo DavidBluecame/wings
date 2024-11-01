@@ -34,17 +34,20 @@ MODULES= \
 	wpc_image \
 	wpc_knot \
 	wpc_ncube \
+	wpc_oblong \
 	wpc_plane \
 	wpc_spiral \
 	wpc_torus \
-	wpc_tt
+	wpc_tt \
+	wpc_thread
 
 TARGET_FILES= $(MODULES:%=$(EBIN)/%.beam)
 
 # ----------------------------------------------------
 # FLAGS
 # ----------------------------------------------------
-ERL_COMPILE_FLAGS += -Werror -I $(WINGS_TOP) $(TYPE_FLAGS) -pa $(WINGS_INTL) +debug_info
+ERL_COMPILE_FLAGS += -Werror -I $(WINGS_TOP) \
+    $(TYPE_FLAGS) -pa $(WINGS_INTL) +debug_info
 
 # ----------------------------------------------------
 # Targets

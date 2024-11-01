@@ -18,7 +18,6 @@
 
 -define(NEED_OPENGL, 1).
 -include("wings.hrl").
--include_lib("wings/e3d/e3d_image.hrl").
 
 -define(cl_lightpos, {2.5, 2.5, 0.0}).
 -define(hl_lightpos, {3000.0, 10000.0, 1000.0}).
@@ -26,20 +25,33 @@
 init() ->
     wings_pref:set_default(hl_skycol, {0.95,0.95,0.90}),
     wings_pref:set_default(hl_groundcol, {0.026,0.024,0.021}),
+    wings_pref:set_default(cl_lightpos, ?cl_lightpos),
+    wings_pref:set_default(cl_lightcol, {1.0,1.0,1.0}),
+    wings_pref:set_default(cam_exposure, 1.0),
+    %% For some reason compiling the shaders twice, solves rendering issues
+    %% on some Intel drivers :-(
+    Vendor = string:tokens(string:lowercase(gl:getString(?GL_VENDOR))," "),
+    case lists:member("intel",Vendor) of
+        true -> compile_all();
+        false -> ignore
+    end,
     compile_all().
 
 compile_all() ->
     HL = [{'LightPosition', wings_pref:get_value(hl_lightpos)},
 	  {'SkyColor', wings_pref:get_value(hl_skycol)},
 	  {'GroundColor', wings_pref:get_value(hl_groundcol)}],
+
     Programs0 = [{1, camera_light, [], "One Camera Lights"},
                  {2, hemilight, HL, "Hemispherical Lighting"},
+                 {background, background, [{blurry, 0.5}], ""},
                  {ambient_light, ambient_light, [], ""},
                  {infinite_light, infinite_light, [], ""},
                  {point_light, point_light, [], ""},
                  {spot_light, spot_light, [], ""},
                  {area_light, area_light, [], ""},
-                 {light_light, light_light, [], ""}
+                 {light_light, light_light, [], ""},
+                 {grid, grid, [], ""}
                 ],
     Make = fun({Id, Name, Uniforms, Desc}, Acc) ->
                    case make_prog(Name, Uniforms, Desc) of
@@ -63,21 +75,33 @@ use_prog(Name, RS) ->
         #{Name:=Shader} ->
             #{prog:=Prog} = Shader,
             wings_gl:use_prog(Prog),
-            RS1 = set_uloc(ws_matrix, e3d_mat:identity(), RS#{shader=>Shader}),
-            RS2 = set_uloc(ws_eyepoint, maps:get(ws_eyepoint, RS1), RS1),
+            RS0 = set_uloc('Exposure', wings_pref:get_value(cam_exposure), RS#{shader=>Shader}),
+            RS1 = set_uloc(ws_matrix, e3d_mat:identity(), RS0),
+            RS2 = set_uloc(ws_eyepoint, maps:get(ws_eyepoint, RS1, undefined), RS1),
+            RS3 = wings_shaders:set_uloc(bg_rotate, wings_pref:get_value(show_bg_rotate), RS2),
+
             case Name of
                 1 ->
-                    WorldFromView = e3d_transform:inv_matrix(maps:get(view_from_world, RS2)),
-                    LPos = e3d_mat:mul_point(WorldFromView, ?cl_lightpos),
-                    set_uloc('ws_lightpos', LPos, RS2);
+                    WorldFromView = e3d_transform:inv_matrix(maps:get(view_from_world, RS3)),
+                    LPos = e3d_mat:mul_point(WorldFromView, wings_pref:get_value(cl_lightpos)),
+                    RS4 = set_uloc('ws_lightpos', LPos, RS3),
+                    set_uloc('LightColor', linear(cl_lightcol), RS4);
                 2 ->
-                    WorldFromView = e3d_transform:inv_matrix(maps:get(view_from_world, RS2)),
+                    WorldFromView = e3d_transform:inv_matrix(maps:get(view_from_world, RS3)),
                     LPos = e3d_mat:mul_point(WorldFromView, ?hl_lightpos),
-                    set_uloc('ws_lightpos', LPos, RS2);
+                    RS4 = set_uloc('ws_lightpos', LPos, RS3),
+                    RS5 = set_uloc('SkyColor', linear(hl_skycol), RS4),
+                    set_uloc('GroundColor', linear(hl_groundcol), RS5);
                 _ ->
-                    RS2
-            end
+                    RS3
+            end;
+        Shaders ->
+            error({shader_not_found, Name, maps:keys(Shaders)})
     end.
+
+linear(Name) when is_atom(Name) ->
+    Col = wings_pref:get_value(Name),
+    wings_color:srgb_to_linear(Col).
 
 set_uloc(Id, To, Rs0) ->
     case maps:get(shader, Rs0) of

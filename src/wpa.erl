@@ -112,7 +112,8 @@ import(#e3d_file{}=E3dFile, St) ->
 import(Files, St0) when is_list(Files) ->
     Imps = importers(),
     Import = fun(File, St) ->
-                     case maps:get(filename:extension(File), Imps, undefined) of
+                     Ext = filename:extension(File),
+                     case maps:get(string:lowercase(Ext), Imps, undefined) of
                          undefined ->
                              wings_u:message(?__(2, "Unknown file format: ")++File),
                              St;
@@ -265,7 +266,7 @@ dialog_template(Mod, export) ->
 	  [{key,export_scale}]}},
 	{?__(6,"Sub-division Steps"),
 	 {text,pref_get(Mod, subdivisions, 0),
-	  [{key,subdivisions},{range,0,4}]}}]},
+	  [{key,subdivisions},{range,{0,4}}]}}]},
       panel,
       {?__(norms, "Export normals/smoothing groups"),  
        pref_get(Mod, include_normals, true), [{key,include_normals}]},
@@ -620,5 +621,5 @@ popup_console() ->
 
 %% Return version string.
 version() ->
-    ?WINGS_VERSION.
+    wings_u:version().
 

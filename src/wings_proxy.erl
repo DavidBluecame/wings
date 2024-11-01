@@ -68,9 +68,9 @@ invalidate(#sp{}=Pd, 'vab') ->
 invalidate(#sp{}=Pd, 'dl') ->
     %% Invalidate displays lists.
     Pd#sp{faces=none,smooth=none};
-invalidate(#sp{faces=none}=Pd, maybe) ->
+invalidate(#sp{faces=none}=Pd, 'maybe') ->
     Pd;
-invalidate(#sp{faces=FL}=Pd, maybe) ->
+invalidate(#sp{faces=FL}=Pd, 'maybe') ->
     Pd#sp{faces=[FL]};
 invalidate(#sp{}=Pd, edges) ->
     Pd#sp{proxy_edges=none};
@@ -639,7 +639,7 @@ add_quad_col_uv(Bin, N, Pos, Attrs0) ->
     add_quad_col_uv(Bin, N, Pos, Attrs).
 
 add_ts([P1,P2,P3,_P4], [UV1,UV2,UV3,_UV4], N, Vs, Ts0) ->  
-    %% Quads, subdivided so rougly the same tangents for both tris.
+    %% Quads, subdivided so roughly the same tangents for both tris.
     wings_draw_setup:add_ts([P1,P2,P3],[UV1,UV2,UV3], N, Vs, Ts0).
 
 fix_color_uv(Attrs) ->

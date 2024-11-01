@@ -11,6 +11,10 @@
 %%     $Id$
 %%
 
+-ifndef(EPSILON).
+-define(EPSILON, 1.0e-7).
+-endif.
+
 %% Types for e3d_bv
 -define(E3D_INFINITY, 3.402823e+38).  %% 32 bits float max
 -type e3d_bbox() :: {e3d_vec:point(), e3d_vec:point()}.
@@ -21,9 +25,6 @@
 -record(e3d_transf,
 	{mat = e3d_mat:identity() :: e3d_mat:matrix(),
 	 inv = e3d_mat:identity() :: e3d_mat:matrix()}).
-
--type e3d_transform() :: #e3d_transf{}.
-
 
 -record(ray,
 	{o::e3d_vec:point(),

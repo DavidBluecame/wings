@@ -17,7 +17,7 @@
 	 set_cursor/1,hourglass/0,eyedropper/0,
 	 info/1, info/3, version_info/0,
 
-	 is_maximized/0, maximize/0, set_title/1, reset_video_mode_for_gl/2,
+	 is_maximized/0, maximize/0, set_title/1, reset_video_mode_for_gl/1,
 	 change_event_handler/2,
 	 read_icons/0, set_icon/2,
 
@@ -26,7 +26,8 @@
 	 get_process_option/0,set_process_option/1,
 
 	 batch/1, foreach/2,
-	 lock/1, unlock/2, lock/2, lock/3,
+	 lock/3,
+         do_unlock/2,    %% Only to be used by wings_io_wx
 
 	 draw_bitmap/1,
 	 set_color/1]).
@@ -59,14 +60,17 @@ get_process_option() ->
 set_process_option(Opts) ->
     wings_io_wx:set_process_option(Opts).
 
-lock(Pid, Fun) ->
-    lock(Pid, Fun, fun() -> ok end).
 
-lock(Pid, Fun, Other) when is_function(Fun), is_function(Other) ->
+lock(Pid, Fun, DoAfter) when is_function(Fun), is_function(DoAfter) ->
     lock(Pid),
-    try Fun()
-    after
-	unlock(Pid, Other)
+    try
+        Res = Fun(),  %% In locking process
+        %% Apply DoAfter in locked process before releasing it
+        Pid ! {unlock, self(), fun() -> DoAfter(Res) end},
+        Res
+    catch Class:Reason:StackT ->
+            Pid ! {unlock, self(), fun() -> ok end},
+            erlang:raise(Class,Reason,StackT)
     end.
 
 lock(Pid) when is_pid(Pid) ->
@@ -83,16 +87,28 @@ lock(Pid) when is_pid(Pid) ->
 			    {'DOWN',Monitor, _,_,_} ->
 				ok
 			after 2000 ->
-				io:format("~p: Can not lock ~p~n", [self(), Pid]),
+				?dbg("~p: Can not lock ~p~n", [self(), Pid]),
 				GetLock()
 			end
 		end,
 	    F()
     end.
 
-unlock(Pid, Fun) ->
-    Pid ! {unlock, self(), Fun},
-    ok.
+do_unlock(Fun, Eq0) ->
+    Fun(),
+    case self() =:= whereis(wings) of
+        false ->
+            Eq0;
+        true ->
+            %% Called from wings_io_wx event loop
+            %% Then we must be in recieve loop
+            %% which only happend when event queue
+            %% was empty, handle any events that where
+            %% added by 'Fun()'
+            Evs = queue:to_list(get(?EVENT_QUEUE)),
+            Add = fun(Ev, Q) -> queue:in_r(Ev, Q) end,
+            lists:foldl(Add, Eq0, Evs)
+    end.
 
 %% Batch processing
 foreach(Fun, List) ->
@@ -150,8 +166,10 @@ maximize() ->
 set_title(Title) ->
     wings_io_wx:set_title(Title).
 
-reset_video_mode_for_gl(W,H) ->
-    wings_io_wx:reset_video_mode_for_gl(W,H).
+reset_video_mode_for_gl(ReCreateCanvas) ->
+    wings_io_wx:reset_video_mode_for_gl(ReCreateCanvas),
+    putback_event_once(init_opengl),
+    ok.
 
 version_info() ->
     wings_io_wx:version_info().
@@ -244,7 +262,7 @@ info_lines_1([_|T], Lines) ->
     info_lines_1(T, Lines);
 info_lines_1([], Lines) -> Lines.
 
-blend({_,_,_,0.0}, _) -> ok;
+blend({_,_,_,+0.0}, _) -> ok;
 blend({_,_,_,1.0}=Color, Draw) -> Draw(Color);
 blend(Color, Draw) ->
     gl:enable(?GL_BLEND),
@@ -275,7 +293,8 @@ ortho_setup_1() ->
     gl:matrixMode(?GL_PROJECTION),
     gl:loadIdentity(),
     {_,_,W,H} = wings_wm:viewport(),
-    glu:ortho2D(0.0, float(W), float(H), 0.0),
+    Ortho = e3d_transform:ortho(0.0, float(W), float(H), 0.0, -1.0, 1.0),
+    gl:loadMatrixd(e3d_transform:matrix(Ortho)),
     gl:matrixMode(?GL_MODELVIEW),
     gl:loadIdentity().
 

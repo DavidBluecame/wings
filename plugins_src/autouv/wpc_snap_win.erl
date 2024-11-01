@@ -223,7 +223,8 @@ draw_image(Image,_St) ->
     gl:pushAttrib(?GL_ALL_ATTRIB_BITS),
     gl:matrixMode(?GL_PROJECTION),
     gl:loadIdentity(),
-    glu:ortho2D(0.0, 1.0, 0.0, 1.0),
+    Ortho = e3d_transform:ortho(0.0, 1.0, 0.0, 1.0, -1.0, 1.0),
+    gl:loadMatrixd(e3d_transform:matrix(Ortho)),
     gl:matrixMode(?GL_MODELVIEW),
     gl:loadIdentity(),
 
@@ -246,7 +247,7 @@ draw_image(Image,_St) ->
     end,
 
     gl:texEnvi(?GL_TEXTURE_ENV, ?GL_TEXTURE_ENV_MODE, ?GL_MODULATE),
-
+    gl:polygonMode(?GL_FRONT_AND_BACK, ?GL_FILL),
     gl:color4f(1.0, 1.0, 1.0, Opa),   %%Semitransparant
     {_,_,W,H} = wings_wm:viewport(),
     {Xs,Ys,Xe,Ye} = {0.0,0.0,1.0,1.0},
@@ -291,8 +292,8 @@ calc_uv_fun() ->
     {Xs,Ys} = scale(W, H, IW, IH),
     %% In the fun, do the calculations that are specific
     %% for each vertex.
-    fun({X,Y,Z}) ->
-            {S,T,_} = wings_gl:project(X, Y, Z, MM, PM, Viewport),
+    fun(Point) ->
+            {S,T,_} = e3d_transform:project(Point, MM, PM, Viewport),
             Center = 0.5,
             {XA0,YA0}={Tx/2+(S/W*Xs*Sx+Center-Sx*Xs/2),Ty/2+(T/H*Sy*Ys+Center-Sy*Ys/2)},
             {XA,YA}=rotate_uv(Rot,{XA0-Center,YA0-Center}),
@@ -591,8 +592,8 @@ init([Frame, Name, {OpaVal,Tiled}=State]) ->
 
     wxToggleButton:connect(BAct, command_togglebutton_clicked),
     wxButton:connect(BSnap, command_button_clicked),
-    wxListBox:connect(ModLbx, left_up),
     wxListBox:connect(ModLbx, motion),
+    wxListBox:connect(ModLbx, command_listbox_selected),
     wxListBox:connect(ModLbx, leave_window),
     wxCheckBox:connect(TileChk, command_checkbox_clicked),
     wxSlider:connect(Opa,command_slider_updated),
@@ -726,7 +727,6 @@ handle_event(#wx{event=#wxMouse{type=motion, x=X, y=Y}, obj=LBox}, State) ->
 	    _ -> -1
 	end,
     if (Sel >= 0) and (Sel =/= Sel0) ->
-            wxListBox:setSelection(LBox, Sel),
             wxListBox:setToolTip(LBox, snap_tooltip(MKind)),
             wings_status:message(wings_wm:this(),snap_tooltip(MKind));
        true -> ok
@@ -739,6 +739,19 @@ handle_event(#wx{event=#wxMouse{type=leave_window}, obj=LBox}, State) ->
     end,
     wxListBox:setToolTip(LBox, ""),
     wings_status:message(wings_wm:this(),""),
+    {noreply, State};
+
+handle_event(#wx{event=#wxCommand{type=command_listbox_selected, commandInt=Sel}, obj=LBox}, State) ->
+    MKind = case Sel of
+                0 -> move;
+                1 -> scale;
+                2 -> fit
+            end,
+    wxListBox:deselect(LBox,Sel),
+    Menus = snap_menu(MKind),
+    MPos = wx_misc:getMousePosition(),
+    Cmd = fun(_) -> wings_menu:popup_menu(LBox, MPos, ?MODULE, Menus) end,
+    wings_wm:psend(?WIN_NAME, {apply, false, Cmd}),
     {noreply, State};
 handle_event(#wx{event=#wxMouse{type=left_up, x=X, y=Y}, obj=LBox}, State) ->
     MPos = wxWindow:clientToScreen(LBox, {X,Y}),
@@ -762,6 +775,7 @@ handle_event(#wx{event=#wxMouse{type=enter_window}}=Ev, State) ->
     wings_frame ! Ev,
     {noreply, State};
 handle_event(#wx{} = _Ev, State) ->
+    %% ?dbg("Got: ~p~n",[_Ev]),
     {noreply, State}.
 
 
@@ -785,7 +799,7 @@ handle_cast({note,image_change}, #state{ctrls=#{imglst:=ImgLst,actbtn:=BAct}}=St
     end,
     {noreply, State};
 handle_cast({action,_}=Cmd, State) ->
-    %% fowarding the context menu options from window to module process
+    %% forwarding the context menu options from window to module process
     wings_wm:psend(geom, Cmd),
     {noreply, State};
 handle_cast(_Req, State) ->

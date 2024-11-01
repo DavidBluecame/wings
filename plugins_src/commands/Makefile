@@ -30,21 +30,23 @@ endif
 MODULES= \
 	wpc_absolute_move \
 	wpc_absolute_scale \
+	wpc_align_to_axis \
 	wpc_ambocc \
 	wpc_arc_intersect \
 	wpc_bend \
 	wpc_circularise \
-	wpc_inset \
 	wpc_connect_tool \
 	wpc_constraints \
 	wpc_cylindrilize \
 	wpc_corner \
 	wpc_deselect_previous \
 	wpc_doosabin \
+	wpc_duplicate_radial \
 	wpc_explode \
 	wpc_flow_connect \
 	wpc_greebles \
 	wpc_grid_snap \
+	wpc_inset \
 	wpc_intersect_edge \
 	wpc_intersect_vertex \
 	wpc_isometric_view \

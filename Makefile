@@ -42,10 +42,11 @@ win32: opt lang
 	escript tools/release
 
 #
-# Build a package for MacOS X.
+# Build a package for macOS.
 #
 .PHONY: macosx
-macosx: opt lang
+macosx: macos
+macos: opt lang
 	escript tools/release
 
 #
@@ -70,6 +71,15 @@ lang: intl_tools src plugins_src
 .PHONY: .FORCE-WINGS-VERSION-FILE
 vsn.mk: .FORCE-WINGS-VERSION-FILE
 	@./WINGS-VERSION-GEN
+
+
+#
+# Dialyze wings and plugins (requires erlang-26)
+#
+
+.PHONY: dialyze
+dialyze: opt intl_tools
+	$(ESCRIPT) tools/dialyze.escript
 
 -include vsn.mk
 

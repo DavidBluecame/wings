@@ -45,7 +45,7 @@
 	 mag_rad,   % magnet influence radius
 	 id,        % {Id,Elem} mouse was over when tweak began
 	 sym,       % current magnet radius adjustment hotkey
-         ox,oy,     % orignal X,Y
+         ox,oy,     % original X,Y
 	 x,y,       % current X,Y
 	 cx,cy,     % Calculated X,Y
          warp,      % true or size limits
@@ -590,7 +590,7 @@ handle_magnet_event(Ev,T) ->
 
 
 %%%
-%%% Handeler for In-Drag Magnet Radius Adjustments
+%%% Handler for In-Drag Magnet Radius Adjustments
 %%%
 
 tweak_drag_mag_adjust(#tweak{st=#st{selmode=body}}) -> keep;
@@ -920,7 +920,7 @@ do_tweak(#dlo{drag=#drag{vs=Vs,pos=Pos0,pos0=Orig,pst=none,  %% pst =:= none
 
     %% scale axis
     V2 = case e3d_vec:norm_sub(Orig,Pos) of
-	     {0.0,0.0,0.0} -> Pos;
+	     {+0.0,+0.0,+0.0} -> Pos;
 	     Other -> Other
 	 end,
 
@@ -1173,7 +1173,7 @@ slide_vec_w(V, Vpos, VposS, TweakPosS, We, W,Vs) ->
 slide_one_vec(Vpos, TweakPos, PosList) ->
     Dpos=e3d_vec:sub(TweakPos,Vpos),
     {Dp,_} = foldl(fun
-		       ({0.0,0.0,0.0},VPW) -> VPW;
+		       ({+0.0,+0.0,+0.0},VPW) -> VPW;
 		       (Vec, {VP,W}) ->
 			  Vn = e3d_vec:norm(Vec),
 			  Dotp = e3d_vec:dot(Vn,Dpos),
@@ -1187,7 +1187,7 @@ slide_one_vec(Vpos, TweakPos, PosList) ->
 				  {e3d_vec:mul(Vn, Dotp2),Dotp};
 			      true -> {VP,W}
 			  end
-		  end,{{0,0,0},0},PosList),
+                   end,{{0.0,0.0,0.0},0.0},PosList),
     e3d_vec:add(Vpos,Dp).
 
 sub_pos_from_list(List,Pos) ->
@@ -1251,7 +1251,7 @@ tweak_along_axis(true, Axis, Pos0, TweakPos) ->
     %% constraining by the plane
     Dot = e3d_vec:dot(Axis, Axis),
     if
-	Dot =:= 0.0 -> Pos0;
+	abs(Dot) < ?EPSILON -> Pos0;
 	true ->
 	    T = - e3d_vec:dot(Axis, e3d_vec:sub(TweakPos, Pos0)) / Dot,
 	    e3d_vec:add_prod(TweakPos, Axis, T)
@@ -1262,7 +1262,7 @@ tweak_along_axis(false, Axis, Pos0, TweakPos) ->
     %% Return the point along the normal closest to TweakPos.
     Dot = e3d_vec:dot(Axis, Axis),
     if
-	Dot =:= 0.0 -> Pos0;
+	abs(Dot) < ?EPSILON -> Pos0;
 	true ->
 	    T = e3d_vec:dot(Axis, e3d_vec:sub(TweakPos, Pos0)) / Dot,
 	    e3d_vec:add_prod(Pos0, Axis, T)
@@ -1272,11 +1272,11 @@ tweak_along_axis(false, Axis, Pos0, TweakPos) ->
 %%% Screen to Object Coordinates
 %%%
 
-obj_to_screen({MVM,PM,VP}, {X,Y,Z}) ->
-    wings_gl:project(X, Y, Z, MVM, PM, VP).
+obj_to_screen({MVM,PM,VP}, Point) ->
+    e3d_transform:project(Point, MVM, PM, VP).
 
-screen_to_obj({MVM,PM,VP}, {Xs,Ys,Zs}) ->
-    wings_gl:unProject(Xs, Ys, Zs, MVM, PM, VP).
+screen_to_obj({MVM,PM,VP}, Point) ->
+    e3d_transform:unproject(Point, MVM, PM, VP).
 
 sel_to_vs(vertex, Vs, _) -> Vs;
 sel_to_vs(edge, Es, We) -> wings_vertex:from_edges(Es, We);
@@ -1488,9 +1488,8 @@ draw_magnet_1(#dlo{src_sel={Mode,Els},src_we=We,mirror=Mtx,drag=#drag{mm=Side}},
     Vs = sel_to_vs(Mode, gb_sets:to_list(Els), We),
     {X,Y,Z} = wings_vertex:center(Vs, We),
     gl:translatef(X, Y, Z),
-    Obj = glu:newQuadric(),
-    glu:sphere(Obj, R, 40, 40),
-    glu:deleteQuadric(Obj);
+    #{size:=Size, tris:=Tris} = wings_shapes:tri_sphere(#{subd=>4, scale=> R, binary => true}),
+    wings_vbo:draw(fun(_) -> gl:drawArrays(?GL_TRIANGLES, 0, Size*3) end, Tris);
 draw_magnet_1(_, _) -> [].
 
 mirror_info(#we{mirror=none}) -> {[],identity};
@@ -2488,8 +2487,8 @@ draw(plain, EdgeList, _D, SelMode, RS) ->
     wings_dl:call(EdgeList, RS);
 draw(_,_,_,_, RS) -> RS.
 
-edge_width(edge) -> wings_pref:get_value(edge_width);
-edge_width(_) -> 1.
+edge_width(edge) -> float(wings_pref:get_value(edge_width));
+edge_width(_) -> 1.0.
 
 col_to_vec({R,G,B}) when is_integer(R) -> {R/255.0,G/255.0,B/255.0};
 col_to_vec({_,_,_}=Col) -> Col;

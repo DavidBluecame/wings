@@ -286,9 +286,9 @@ cut_pick_make_tvs(Edge, #we{es=Etab,vp=Vtab,next_id=NewV}=We) ->
     {We#we{temp=Fun},Sel}.
 
 cut_pick_marker([I], D, Edge, We0, Start, Dir, Char) ->
-    {X,Y,Z} = Pos = e3d_vec:add_prod(Start, Dir, I),
+    Pos = e3d_vec:add_prod(Start, Dir, I),
     {MM,PM,ViewPort} = wings_u:get_matrices(0, original),
-    {Sx,Sy,_} = wings_gl:project(X, Y, Z, MM, PM, ViewPort),
+    {Sx,Sy,_} = e3d_transform:project(Pos, MM, PM, ViewPort),
     Draw = fun(Ds) ->
 		   gl:pushAttrib(?GL_ALL_ATTRIB_BITS),
 		   gl:color3f(1.0, 0.0, 0.0),
@@ -298,7 +298,8 @@ cut_pick_marker([I], D, Edge, We0, Start, Dir, Char) ->
 		   gl:pushMatrix(),
 		   gl:loadIdentity(),
 		   {W,H} = wings_wm:win_size(),
-		   glu:ortho2D(0.0, W, 0.0, H),
+                   Ortho = e3d_transform:ortho(0.0, float(W), 0.0, float(H), -1.0, 1.0),
+                   gl:loadMatrixd(e3d_transform:matrix(Ortho)),
 		   gl:matrixMode(?GL_MODELVIEW),
 		   gl:pushMatrix(),
 		   gl:loadIdentity(),
@@ -380,14 +381,15 @@ hardness(hard, St) ->
 %%% The Slide command.
 %%%
 
+slide(#st{sel=[]}=St) -> St;
 slide(St0) ->
     Mode = wings_pref:get_value(slide_mode, relative),
     Stop = wings_pref:get_value(slide_stop, false),
     State = {Mode,none,Stop},
     SUp = SDown = SN = SBi = {0.0,0.0,0.0},
 
-    %% FIXME: The use of the process dicationary (wings_slide) will
-    %% not work when each #we{} are stored in its own process.
+    %% FIXME: The use of the process dictionary (wings_slide) will
+    %% not work when each #we{} is stored in its own process.
     %%
     %% FIXME: Someone who understands the Up, Dw, N, and Bi parameters
     %% should rewrite this code in a way that can be parallelized
@@ -439,6 +441,8 @@ slide_mode(MinUp,MinDw) ->
     end.
 
 slide_units({absolute,_,false},_,_) -> [distance];
+slide_units({absolute,_Freeze,true},unknown,unknown) ->
+    [{distance, {-1.0, 1.0}}];
 slide_units({absolute,_Freeze,true},MinUp,MinDw) ->
     [{distance, {-MinUp, MinDw}}];
 slide_units({relative,_,false},_,_) -> [percent];

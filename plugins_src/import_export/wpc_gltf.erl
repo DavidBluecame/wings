@@ -59,15 +59,17 @@ do_export(Ask, Op, _Exporter, _St) when is_atom(Ask) ->
 	       fun(Res) ->
 		       {file,{Op,{glb,Res}}}
 	       end);
-do_export(Attr, _Op, Exporter, _St) when is_list(Attr) ->
+do_export(Attr, _Op, Exporter, #st{file=File}=_St) when is_list(Attr) ->
     set_pref(Attr),
     SubDivs = proplists:get_value(subdivisions, Attr, 0),
     Uvs = proplists:get_bool(include_uvs, Attr),
+    FileName = filename:basename(File,".wings"),
     %% Units = proplists:get_value(units, Attr),
     Ps = [{include_uvs,Uvs},%% {units,Units},
           {tesselation, triangulate},
           {include_hard_edges, true},
-	  {subdivisions,SubDivs}|props()],
+          {subdivisions,SubDivs},
+          {default_filename,FileName}|props(proplists:get_value(file_type, Attr))],
     Exporter(Ps, export_fun(Attr)),
     keep.
 
@@ -83,10 +85,12 @@ dialog(Type) ->
      %% wpa:dialog_template(?MODULE, units), panel,
      wpa:dialog_template(?MODULE, Type, [include_colors, include_normals])].
 
-props() ->
-    [{extensions,
-      [{".glb",  "gltf binary"},
-       {".gltf", "gl Transmission Format"}]}].
+props(Type) ->
+    Ext = case Type of
+              glb -> {".glb",  "gltf binary"};
+              gltf -> {".gltf", "gl Transmission Format"}
+          end,
+    [{extensions, [Ext]}].
 
 set_pref(KeyVals) ->
     wpa:pref_set(?MODULE, KeyVals).
@@ -207,9 +211,9 @@ exp_add_index(Ps0, GLTF0) ->
     {Ps1, Bin} = lists:mapfoldl(AppendBin, <<>>, Ps0),
     {BVId, GLTF1} = exp_add(Bin, bufferViews, GLTF0),
     lists:mapfoldr(fun({#{indices:=Len}=P, Offset}, GLTF_t) ->
-                           Acces = exp_make_acc(BVId, Len, ?GL_UNSIGNED_INT,
+                           Access = exp_make_acc(BVId, Len, ?GL_UNSIGNED_INT,
                                                 <<"SCALAR">>, Offset),
-                           {AId, GLTF} = exp_add(Acces, accessors, GLTF_t),
+                           {AId, GLTF} = exp_add(Access, accessors, GLTF_t),
                            {P#{indices:=AId}, GLTF}
                    end, GLTF1, Ps1).
 
@@ -826,7 +830,7 @@ make_matrix(Key, Node) ->
             case Key of
                 translation -> e3d_mat:translate(X,Y,Z);
                 scale       -> e3d_mat:scale(X,Y,Z);
-                rotation when T =:= [0.0] -> e3d_mat:identity();
+                rotation when T =:= [+0.0] -> e3d_mat:identity();
                 rotation    -> e3d_q:to_rotation_matrix({{X,Y,Z},hd(T)})
             end
     end.

@@ -12,7 +12,7 @@
 %%
 
 -module(wings_light).
--export([init/0, init/1, init_opengl/0,
+-export([init/0, init/1, init_opengl/0, load_env_image/1,
          light_types/0,menu/3,command/2,is_any_light_selected/1,
 	 any_enabled_lights/0,info/1,setup_light/2,
 	 create/2,update_dynamic/2,update_matrix/2,update/1,
@@ -50,28 +50,58 @@
 	 prop=[]				%Extra properties.
 	}).
 
-init() ->
-    init(false).
-
-init(Recompile) ->
-    Path = filename:join(wings_util:lib_dir(wings), "textures"),
-    LTCmatFile = "areal_ltcmat.bin",
-    {ok, LTCmat} = file:read_file(filename:join(Path, LTCmatFile)),
-    AreaMatTxId = load_area_light_tab(LTCmat),
+def_envmap() ->
     DefEnvMap = "grandcanyon.png",
-    EnvImgRec = wings_image:image_read([{filename, filename:join(Path, DefEnvMap)}]),
+    DefPath = filename:join(wings_util:lib_dir(wings), "textures"),
+    filename:join(DefPath, DefEnvMap).
+
+init() ->
+    wings_pref:set_default(show_bg, false),
+    wings_pref:set_default(show_bg_blur, 0.5),
+    wings_pref:set_default(show_bg_rotate, 0.0),
+    wings_pref:set_default(bg_image, def_envmap()),
+    EnvImgRec = load_env_file(wings_pref:get_value(bg_image)),
+    init(false, EnvImgRec).
+
+init(Recompile) ->  %% Debug
+    EnvImgRec = load_env_file(wings_pref:get_value(bg_image)),
+    init(Recompile, EnvImgRec).
+
+init(Recompile, EnvImgRec) ->
+    AreaMatTagId = load_area_light_tab(),
     EnvIds = case wings:is_fast_start() orelse cl_setup(Recompile) of
                  true ->
-                     fake_envmap(Path, EnvImgRec);
+                     fake_envmap(load_env_file(def_envmap()));
                  {error, _} ->
                      ErrorStr = ?__(1, "Could not initialize OpenCL: env lighting limited ~n"),
                      io:format(ErrorStr,[]),
                      wings_status:message(geom, ErrorStr),
-                     fake_envmap(Path, EnvImgRec);
+                     fake_envmap(load_env_file(def_envmap()));
                  CL ->
                      make_envmap(CL, EnvImgRec)
              end,
-    [?SET(Tag, Id) || {Tag,Id} <- [AreaMatTxId|EnvIds]],
+    [?SET(Tag, Id) || {Tag,Id} <- [AreaMatTagId|EnvIds]],
+    init_opengl(),
+    wings_develop:gl_error_check({?MODULE,?FUNCTION_NAME}),
+    ok.
+
+-spec load_env_image(FileName::string()) -> ok | {file_error, {error, term()}} | {cl_error, {error, term()}}.
+load_env_image(FileName) ->
+    try load_env_image_1(FileName)
+    catch throw:Error ->
+            Error
+    end.
+
+load_env_image_1(FileName) ->
+    EnvImgRec = wings_image:image_read([{filename, FileName}]),
+    is_record(EnvImgRec, e3d_image) orelse throw({file_error, EnvImgRec}),
+    CL = case cl_setup(false) of
+             {error, _} = Error ->
+                 throw({cl_error, Error});
+             CL0 -> CL0
+         end,
+    EnvIds = make_envmap(CL, EnvImgRec),
+    [?SET(Tag, Id) || {Tag,Id} <- EnvIds],
     init_opengl(),
     wings_develop:gl_error_check({?MODULE,?FUNCTION_NAME}),
     ok.
@@ -94,6 +124,15 @@ init_opengl() ->
                 end,
     _ = [SetupUnit(Id) || Id <- Ids],
     ok.
+
+load_env_file(FileName) ->
+    case wings_image:image_read([{filename, FileName}]) of
+        #e3d_image{} = Img ->
+            Img;
+        _Error ->
+            ?dbg("Could not load env image: ~p~n", [FileName]),
+            wings_image:image_read([{filename, def_envmap()}])
+    end.
 
 command({move_light,Type}, St) ->
     wings_move:setup(Type, St);
@@ -427,44 +466,54 @@ create(Type, #st{onext=Oid}=St) ->
 update_dynamic(#dlo{src_we=We0}=D, Vtab0) ->
     Vtab = array:from_orddict(sort(Vtab0)),
     We = We0#we{vp=Vtab},
-    List = update_1(We, D),
-    D#dlo{work=List,src_we=We}.
+    update_1(We, D#dlo{src_we=We}).
 
 update_matrix(#dlo{src_we=We0}=D, Matrix) ->
     We = wings_we:transform_vs(Matrix, We0),
-    List = update_1(We, D),
-    D#dlo{work=List,sel=none,transparent=We}.
+    update_1(We, D#dlo{transparent=We}).
 
-update(#dlo{work=none,src_we=#we{light=#light{}}=We}=D) ->
-    List = update_1(We, D),
-    D#dlo{work=List,sel=List};
-update(#dlo{sel=none,src_we=#we{light=#light{}}=We}=D) ->
-    List = update_1(We, D),
-    D#dlo{work=List,sel=List};
+update(#dlo{work=W,src_sel=Sel,src_we=#we{light=#light{}}=We}=D) ->
+    IsSel = Sel =/= none,
+    HaveW = W =/= none andalso not is_list(W),
+    HaveS = is_list(W),
+    if
+        W =:= none -> update_1(We, D);
+        IsSel andalso HaveS -> D;
+        (not IsSel) andalso HaveW -> D;
+        true -> update_1(We, D)
+    end;
 update(D) -> D.
 
-update_1(#we{light=#light{type=Type}}=We, #dlo{src_sel=SrcSel}) ->
-    SelColor = case SrcSel of
-		   none -> {0.0,0.0,1.0,1.0};
-		   _ -> {R,G,B} = wings_pref:get_value(selected_color),
-                        {R,G,B,1.0}
+update_1(#we{light=#light{type=Type}}=We, #dlo{src_sel=Sel}=D) ->
+    IsSel = Sel =/= none,
+    SelColor = case IsSel of
+		   false -> {0.0,0.0,1.0,1.0};
+		   true -> {R,G,B} = wings_pref:get_value(selected_color),
+                           {R,G,B,1.0}
 	       end,
-    update_fun(Type, SelColor, We).
+    Draw = update_fun(Type, SelColor, We),
+    case IsSel of
+        true ->
+            %% Use a list of ops to indicate selected color
+            D#dlo{work=[Draw], sel=Draw};
+        false ->
+            D#dlo{work=Draw, sel=none}
+    end.
 
 update_fun(infinite, SelColor, #we{light=#light{aim=Aim}}=We) ->
     LightPos = light_pos(We),
     LightCol = get_light_col(We),
     Vec = e3d_vec:norm_sub(Aim, LightPos),
     Data = [e3d_vec:mul(Vec, 0.2),e3d_vec:mul(Vec, 0.6)],
-    {Len, Tris,_,_,_} = wings_shapes:tri_sphere(#{subd=>3, scale=>0.08}),
+    #{size:=Len, tris:=Tris} = wings_shapes:tri_sphere(#{subd=>3, scale=>0.08}),
     D = fun(RS) ->
 		gl:lineWidth(1.5),
 		gl:pushMatrix(),
 		{X,Y,Z} = LightPos,
 		gl:translatef(X, Y, Z),
-		wings_shaders:set_uloc(light_color, LightCol, RS),
+		wings_shaders:set_uloc(light_color, wings_color:srgb_to_linear(LightCol), RS),
                 gl:drawArrays(?GL_TRIANGLES, 2, Len*3),
-                wings_shaders:set_uloc(light_color, SelColor, RS),
+                wings_shaders:set_uloc(light_color, wings_color:srgb_to_linear(SelColor), RS),
                 gl:drawArrays(?GL_LINES, 0, 2),
 		gl:popMatrix(),
                 RS
@@ -481,15 +530,15 @@ update_fun(point, SelColor, We) ->
 	     {0.0,0.71,0.71}],
     N = length(Data0) * 4,
     Data = lines(Data0),
-    {Len, Tris,_,_,_} = wings_shapes:tri_sphere(#{subd=>3, scale=>0.08}),
+    #{size:=Len, tris:=Tris} = wings_shapes:tri_sphere(#{subd=>3, scale=>0.08}),
     D = fun(RS) ->
 		gl:lineWidth(1.0),
-		wings_shaders:set_uloc(light_color, LightCol, RS),
+		wings_shaders:set_uloc(light_color, wings_color:srgb_to_linear(LightCol), RS),
 		gl:pushMatrix(),
 		{X,Y,Z} = LightPos,
 		gl:translatef(X, Y, Z),
                 gl:drawArrays(?GL_TRIANGLES, N, Len*3),
-		wings_shaders:set_uloc(light_color, SelColor, RS),
+		wings_shaders:set_uloc(light_color, wings_color:srgb_to_linear(SelColor), RS),
 		gl:drawArrays(?GL_LINES, 0, N),
 		gl:popMatrix(),
                 RS
@@ -508,26 +557,25 @@ update_fun(spot, SelColor, #we{light=#light{aim=Aim,spot_angle=Angle}}=We) ->
     H = math:cos(Rad),
     Translate = e3d_vec:mul(SpotDir, H),
     Rot = e3d_mat:rotate_s_to_t({0.0,0.0,1.0}, e3d_vec:neg(SpotDir)),
-    {Len, Tris,_,_,_} = wings_shapes:tri_sphere(#{subd=>3, scale=>0.08}),
+    #{size:=Len, tris:=Tris} = wings_shapes:tri_sphere(#{subd=>3, scale=>0.08}),
+    CylLines = cylinder_lines(R, 0.08, H, 3),
+    N = length(CylLines),
     D = fun(RS) ->
                 gl:lineWidth(1.0),
-		wings_shaders:set_uloc(light_color, LightCol, RS),
+		wings_shaders:set_uloc(light_color, wings_color:srgb_to_linear(LightCol), RS),
                 gl:pushMatrix(),
                 {Tx,Ty,Tz} = Top,
                 gl:translatef(Tx, Ty, Tz),
                 gl:drawArrays(?GL_TRIANGLES, 0, Len*3),
-		wings_shaders:set_uloc(light_color, SelColor, RS),
+		wings_shaders:set_uloc(light_color, wings_color:srgb_to_linear(SelColor), RS),
                 {Dx,Dy,Dz} = Translate,
                 gl:translatef(Dx, Dy, Dz),
                 gl:multMatrixd(Rot),
-                Obj = glu:newQuadric(),
-                glu:quadricDrawStyle(Obj, ?GLU_LINE),
-                glu:cylinder(Obj, R, 0.08, H, 12, 1),
-                glu:deleteQuadric(Obj),
+                gl:drawArrays(?GL_LINES, Len*3, N),
                 gl:popMatrix(),
                 RS
         end,
-    wings_vbo:new(D, Tris);
+    wings_vbo:new(D, Tris ++ CylLines);
 update_fun(ambient, _, _) ->
     fun(RS) -> RS end.
 
@@ -537,6 +585,33 @@ lines([Vec|Vecs]) ->
      e3d_vec:mul(Vec, -0.2),
      e3d_vec:mul(Vec, -0.6)|lines(Vecs)];
 lines([]) -> [].
+
+cylinder_lines(BaseR, TopR, H, Levels) ->
+    Quad = [{0.0,1.0,0.0},{-1.0,0.0,0.0},{0.0,-1.0,0.0},{1.0,0.0,0.0}],
+    Subd = subd_cyl(Quad, Levels),
+    Orig = mk_lines(Subd, hd(Subd)),
+    Base = [e3d_vec:mul(V, BaseR) || V <- Orig],
+    Top  = [e3d_vec:add_prod({0.0, 0.0, H}, V, TopR) || V <- Orig],
+    Connect = lists:foldl(fun({A,B}, Acc) -> [A,B|Acc] end, [], lists:zip(Base,Top)),
+    Base ++ Top ++ Connect.
+
+subd_cyl(List, Level) when Level > 1 ->
+    New = subd_cyl(List, hd(List), []),
+    subd_cyl(New, Level-1);
+subd_cyl(List, _) ->
+    List.
+
+subd_cyl([V1|[V2|_]=Rest], First, Acc) ->
+    M = e3d_vec:norm(e3d_vec:average(V1, V2)),
+    subd_cyl(Rest, First, [M, V1|Acc]);
+subd_cyl([V1], V2, Acc) ->
+    M = e3d_vec:norm(e3d_vec:average(V1, V2)),
+    [M, V1|Acc].
+
+mk_lines([V1|[V2|_]=Rest],First) ->
+    [V1,V2|mk_lines(Rest,First)];
+mk_lines([V1], V2) ->
+    [V1,V2].
 
 get_light_col(#we{light=#light{diffuse=Diff}}) ->
     Diff.
@@ -797,14 +872,14 @@ scene_lights_fun(#dlo{drag=Drag,src_we=We0}=D) ->
     We = case We0 of
 	     #we{light=#light{type=area}} ->
 		 %% For an area light it looks better in vertex/edge/face
-		 %% modes to emulate with the static non-splitted shape
+		 %% modes to emulate with the static non-split shape
 		 %% during drag. It would be more correct if the area light
 		 %% updating would use the resulting #we{}, but it does not
 		 %% exist until the drag is done.
 		 wings_draw:original_we(D);
 	     _ ->
 		 %% Non-area lights drag the whole shape so they can use
-		 %% the dynamic part of the splitted shape
+		 %% the dynamic part of the split shape
 		 %% (which is the whole shape).
 		 We0
 	 end,
@@ -840,22 +915,22 @@ prepare_light(#light{type=area}=L, We, M) ->
 
 setup_light(#{light:=#light{type=ambient,ambient=Amb}}, RS0) ->
     RS = wings_shaders:use_prog(ambient_light, RS0),
-    wings_shaders:set_uloc(light_diffuse, Amb, RS);
+    wings_shaders:set_uloc(light_diffuse, wings_color:srgb_to_linear(Amb), RS);
 
 setup_light(#{light:=#light{type=infinite, diffuse=Diff, specular=Spec},
               pos:=Pos}, RS0) ->
     RS1 = wings_shaders:use_prog(infinite_light, RS0),
     RS2 = wings_shaders:set_uloc(ws_lightpos, Pos, RS1),
-    RS3 = wings_shaders:set_uloc(light_diffuse, Diff, RS2),
-    wings_shaders:set_uloc(light_specular, Spec, RS3);
+    RS3 = wings_shaders:set_uloc(light_diffuse, wings_color:srgb_to_linear(Diff), RS2),
+    wings_shaders:set_uloc(light_specular, wings_color:srgb_to_linear(Spec), RS3);
 
 setup_light(#{light:=#light{type=point, diffuse=Diff,specular=Spec,
                             lin_att=Lin,quad_att=Quad},
               pos:=Pos}, RS0) ->
     RS1 = wings_shaders:use_prog(point_light, RS0),
     RS2 = wings_shaders:set_uloc(ws_lightpos, Pos, RS1),
-    RS3 = wings_shaders:set_uloc(light_diffuse, Diff, RS2),
-    RS4 = wings_shaders:set_uloc(light_specular, Spec, RS3),
+    RS3 = wings_shaders:set_uloc(light_diffuse, wings_color:srgb_to_linear(Diff), RS2),
+    RS4 = wings_shaders:set_uloc(light_specular, wings_color:srgb_to_linear(Spec), RS3),
     wings_shaders:set_uloc(light_att, {0.8, Lin, Quad}, RS4);
 
 setup_light(#{light:=#light{type=spot, diffuse=Diff,specular=Spec,
@@ -864,19 +939,19 @@ setup_light(#{light:=#light{type=spot, diffuse=Diff,specular=Spec,
               pos:=Pos, dir:=Dir}, RS0) ->
     RS1 = wings_shaders:use_prog(spot_light, RS0),
     RS2 = wings_shaders:set_uloc(ws_lightpos, Pos, RS1),
-    RS3 = wings_shaders:set_uloc(light_diffuse, Diff, RS2),
+    RS3 = wings_shaders:set_uloc(light_diffuse, wings_color:srgb_to_linear(Diff), RS2),
     RS4 = wings_shaders:set_uloc(light_att, {0.8, Lin, Quad}, RS3),
     RS5 = wings_shaders:set_uloc(light_dir, Dir, RS4),
     RS6 = wings_shaders:set_uloc(light_angle, math:cos(Angle*math:pi()/180.0), RS5),
     RS7 = wings_shaders:set_uloc(light_exp, Exp, RS6),
-    wings_shaders:set_uloc(light_specular, Spec, RS7);
+    wings_shaders:set_uloc(light_specular, wings_color:srgb_to_linear(Spec), RS7);
 
 setup_light(#{light:=#light{type=area, diffuse=Diff, specular=Spec,
                             lin_att=Lin,quad_att=Quad},
               points:=Points}, RS0) ->
     RS1 = wings_shaders:use_prog(area_light, RS0),
-    RS2 = wings_shaders:set_uloc(light_diffuse, Diff, RS1),
-    RS3 = wings_shaders:set_uloc(light_specular, Spec, RS2),
+    RS2 = wings_shaders:set_uloc(light_diffuse, wings_color:srgb_to_linear(Diff), RS1),
+    RS3 = wings_shaders:set_uloc(light_specular, wings_color:srgb_to_linear(Spec), RS2),
     RS4 = wings_shaders:set_uloc(light_att, {0.8, Lin, Quad}, RS3),
     wings_shaders:set_uloc(light_points, Points, RS4).
 
@@ -914,13 +989,17 @@ shape_materials(#we{id=Id, light=#light{diffuse=Front}}, #st{mat=Mtab}=St) ->
     St#st{mat=gb_trees:insert({'_area_light_',Id},[Front],Mtab)}.
 
 mul_point(none, Pos) -> Pos;
-mul_point({1.0,0.0,0.0, 0.0,1.0,0.0, 0.0,0.0,1.0, Tx,Ty,Tz}, {X,Y,Z}) ->
+mul_point({1.0,+0.0,+0.0, +0.0,1.0,+0.0, +0.0,+0.0,1.0, Tx,Ty,Tz}, {X,Y,Z}) ->
     {X+Tx,Y+Ty,Z+Tz};
 mul_point(M, P) -> e3d_mat:mul_point(M, P).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-load_area_light_tab(LTCmat) ->
+load_area_light_tab() ->
+    Path = filename:join(wings_util:lib_dir(wings), "textures"),
+    LTCmatFile = "areal_ltcmat.bin",
+    {ok, LTCmat} = file:read_file(filename:join(Path, LTCmatFile)),
+
     64*64*4*4 = byte_size(LTCmat),
     Opts = [{wrap, {clamp,clamp}}, {filter, {linear, linear}}],
     ImId = wings_image:new_hidden(area_mat,
@@ -932,15 +1011,16 @@ load_area_light_tab(LTCmat) ->
     ?CHECK_ERROR(),
     {areamatrix_tex, ImId}.
 
-fake_envmap(Path, EnvImgRec) ->
-    %% Poor mans version with blured images
+fake_envmap(EnvImgRec) ->
+    %% Poor mans version with blurred images
+    Path = filename:join(wings_util:lib_dir(wings), "textures"),
     SpecBG = wings_image:e3d_to_wxImage(EnvImgRec),
     wxImage:rescale(SpecBG, 512, 256, [{quality, ?wxIMAGE_QUALITY_HIGH}]),
     tone_map(SpecBG),
     SBG0 = wings_image:wxImage_to_e3d(SpecBG),
     SpecBG1 = wxImage:copy(SpecBG),
     MMs = make_mipmaps(SpecBG1, 1, 256, 128),
-    Opts = [{wrap, {repeat,clamp}}, {filter, {mipmap, linear}}, {mipmaps, MMs}],
+    Opts = [{wrap, {repeat,repeat}}, {filter, {mipmap, linear}}, {mipmaps, MMs}],
     SBG = SBG0#e3d_image{name="Fake Spec", extra=Opts},
     SpecId = wings_image:new_hidden(env_spec_tex, SBG),
 
@@ -948,7 +1028,7 @@ fake_envmap(Path, EnvImgRec) ->
     DiffBG = wxImage:blur(SpecBG, 10),
     blur_edges(DiffBG),
     DBG0 = wings_image:wxImage_to_e3d(DiffBG),
-    DBG = DBG0#e3d_image{name="Fake diffuse", extra=[{wrap, {repeat,clamp}},
+    DBG = DBG0#e3d_image{name="Fake diffuse", extra=[{wrap, {repeat,repeat}},
                                                      {filter, {linear,linear}}]},
     wxImage:destroy(SpecBG),
     wxImage:destroy(DiffBG),
@@ -1040,24 +1120,36 @@ make_mipmaps(Img, _, _, _) ->
     wxImage:destroy(Img),
     [].
 
-make_envmap(CL, EnvImgRec0) ->
+make_envmap(CL, #e3d_image{filename=FileName}=EnvImgRec) ->
+    EnvIds =
+        case load_cached_envmap(FileName) of
+            [] ->
+                Cached = make_envmap_1(CL, EnvImgRec),
+                save_cached_envmap(FileName, Cached),
+                [TagId || {TagId,_} <- Cached];
+            Cached ->
+                Cached
+        end,
+    wings_cl:working(),
+    EnvIds.
+
+make_envmap_1(CL, EnvImgRec0) ->
     wings_pb:start(?__(1, "Building envmaps")),
     EnvImgRec = e3d_image:convert(EnvImgRec0, r8g8b8a8, 1, lower_left),
     wings_pb:update(0.1),
     W = 512, H = 256,  %% Sizes for result images
     OrigImg = wings_cl:image(EnvImgRec, CL),
-    Buff0   = wings_cl:buff(W*512*4*4, [read_write], CL),
-    Buff1   = wings_cl:buff(W*512*4*4, [read_write], CL),
+    Buff0   = wings_cl:buff(2048*1024*4*4, [read_write], CL),
+    Buff1   = wings_cl:buff(2048*1024*4*4, [read_write], CL),
     BrdfId = make_brdf(Buff0, 512, 512, CL),
     wings_pb:update(0.5),
     DiffId = make_diffuse(OrigImg, Buff0, Buff1, W, H, CL),
     wings_pb:update(0.9),
-    SpecId = make_spec(OrigImg, Buff0, Buff1, W, H, CL),
+    SpecId = make_spec(OrigImg, Buff0, Buff1, 2048, 1024, CL),
     wings_pb:done(),
     cl:release_mem_object(OrigImg),
     cl:release_mem_object(Buff0),
     cl:release_mem_object(Buff1),
-    wings_cl:working(),
     [DiffId,SpecId,BrdfId].
 
 make_brdf(Buff, W, H, CL) ->
@@ -1069,7 +1161,7 @@ make_brdf(Buff, W, H, CL) ->
     %% wings_image:debug_display(brdf,#e3d_image{width=W, height=H, image=Img, name="BRDF"}),
     Opts = [{wrap, {clamp,clamp}}, {filter, {linear, linear}}],
     ImId = wings_image:new_hidden(brdf_tex, #e3d_image{width=W,height=H,image=Img,extra=Opts}),
-    {brdf_tex, ImId}.
+    {{brdf_tex, ImId}, Img}.
 
 make_diffuse(OrigImg, Buff0, Buff1, W, H, CL) ->
     Fill0 = wings_cl:fill(Buff0, <<0:(32*4)>>, W*H*4*4, CL),
@@ -1082,16 +1174,17 @@ make_diffuse(OrigImg, Buff0, Buff1, W, H, CL) ->
     Img = << << (round(R*255)), (round(G*255)), (round(B*255)) >> ||
               <<R:32/float-native, G:32/float-native, B:32/float-native, _:32>> <= DiffData >>,
     %% wings_image:debug_display(1000+W,#e3d_image{width=W, height=H, image=Img, name="Diffuse"}),
-    Opts = [{wrap, {repeat,clamp}}, {filter, {linear, linear}}],
+    Opts = [{wrap, {repeat,repeat}}, {filter, {linear, linear}}],
     ImId = wings_image:new_hidden(env_diffuse_tex, #e3d_image{width=W,height=H,image=Img,extra=Opts}),
-    {env_diffuse_tex, ImId}.
+    {{env_diffuse_tex, ImId}, Img}.
 
 make_spec(OrigImg, Buff0, Buff1, W0, H0, CL) ->
     NoMipMaps = trunc(math:log2(min(W0,H0))),
     [{Img,W0,H0,0}|MMs] = make_spec(0, NoMipMaps, OrigImg, Buff0, Buff1, W0, H0, CL),
-    Opts = [{wrap, {repeat,clamp}}, {filter, {mipmap, linear}}, {mipmaps, MMs}],
+    Opts = [{wrap, {repeat,repeat}}, {filter, {mipmap, linear}}, {mipmaps, MMs}],
+    %% ?dbg("Spec: ~p ~p => ~w mipmaps~n",[W0,H0,length(MMs)]),
     ImId = wings_image:new_hidden(env_spec_tex, #e3d_image{width=W0,height=H0,image=Img,extra=Opts}),
-    {env_spec_tex, ImId}.
+    {{env_spec_tex, ImId}, {Img,MMs}}.
 
 make_spec(Level, Max, OrigImg, Buff0, Buff1, W, H, CL) when Level =< Max ->
     Step = Level/Max,
@@ -1107,10 +1200,67 @@ make_spec(Level, Max, OrigImg, Buff0, Buff1, W, H, CL) when Level =< Max ->
     %% io:format("~p: ~p ~p  ~.3f~n", [Level, W, H, Step]),
     %% Level < 3 andalso
     %%     wings_image:debug_display(900-Level, #e3d_image{width=W, height=H, image=Img,
-    %%                                         name="Spec: " ++ integer_to_list(Level)}),
+    %%                                                     name="Spec: " ++ integer_to_list(Level)}),
     [{Img,W,H,Level} | make_spec(Level+1, Max, OrigImg, Buff0, Buff1, W div 2, H div 2, CL)];
 make_spec(_Level, _Max, _OrigImg, _B0, _B1, _W, _H, _CL) ->
     [].
+
+save_cached_envmap(FileName0, Cached0) ->
+    FileName = env_map_cache_name(FileName0),
+    case file:open(FileName, [write, raw, binary]) of
+        {ok,File} ->
+            Cached = [{Tag,Img} || {{Tag,_},Img} <- Cached0],
+            Bin = term_to_binary(Cached),
+            file:write(File,Bin),
+            file:close(File);
+        _ ->
+            ok
+    end,
+    ok.
+
+%% By not being able to load the file we return an empty list
+%% signing that a new environment map needs to be computed
+load_cached_envmap(FileName0) ->
+    FileName = env_map_cache_name(FileName0),
+    case filelib:is_file(FileName) of
+        true ->
+            case file:read_file(FileName) of
+                {ok,Bin} ->
+                    Cached = binary_to_term(Bin),
+                    [rebuild_cached_img(Buf) || Buf <- Cached];
+                _ ->
+                    file:delete(FileName),
+                    []
+                end;
+        false -> []
+    end.
+
+env_map_cache_name(FileName) ->
+    CacheName = filename:rootname(filename:basename(FileName))++".emc",
+    filename:join(wings_u:basedir(user_cache), CacheName).
+
+rebuild_cached_img({Tag,Img}) ->
+    case Tag of
+        brdf_tex -> cached_brdf(Img, 512, 512);
+        env_diffuse_tex -> cached_diffuse(Img, 512, 256);
+        env_spec_tex -> cached_spec(Img, 2048, 1024)
+    end.
+
+cached_brdf(Img, W, H) ->
+    Opts = [{wrap, {clamp,clamp}}, {filter, {linear, linear}}],
+    ImId = wings_image:new_hidden(brdf_tex, #e3d_image{width=W,height=H,image=Img,extra=Opts}),
+    {brdf_tex, ImId}.
+
+cached_diffuse(Img, W, H) ->
+    Opts = [{wrap, {repeat,repeat}}, {filter, {linear, linear}}],
+    ImId = wings_image:new_hidden(env_diffuse_tex, #e3d_image{width=W,height=H,image=Img,extra=Opts}),
+    {env_diffuse_tex, ImId}.
+
+cached_spec({Img,MMs}, W, H) ->
+    Opts = [{wrap, {repeat,repeat}}, {filter, {mipmap, linear}}, {mipmaps, MMs}],
+    ImId = wings_image:new_hidden(env_spec_tex, #e3d_image{width=W,height=H,image=Img,extra=Opts}),
+    {env_spec_tex, ImId}.
+
 
 cl_multipass(Kernel, Args, Buff0, Buff1, N, Tot, No, Wait, CL) when N < Tot ->
     Next = wings_cl:cast(Kernel, Args ++ [Buff0, Buff1, N, Tot], No, Wait, CL),
@@ -1192,9 +1342,9 @@ menu(X, Y, St) ->
 		  ?__(11,"Interactively adjust how much light weakens as it travels away from its source (quadratic factor)")}]}}},
 	     {SpotOnly,separator},
 	     {SpotOnly,{?__(12,"Spot Angle"),spot_angle,
-			?__(13,"Interactivly adjust the angle of the spotlight cone")}},
+			?__(13,"Interactively adjust the angle of the spotlight cone")}},
 	     {SpotOnly,{?__(14,"Spot Falloff"),spot_falloff,
-			?__(15,"Interactivly adjust how much light weakens farther away from the center of the spotlight cone")}},
+			?__(15,"Interactively adjust how much light weakens farther away from the center of the spotlight cone")}},
 	     {One,separator},
 	     {One,{?__(16,"Edit Properties..."),edit,
 		   ?__(17,"Edit light properties")}}|body_menu(Dir, St)],
@@ -1206,7 +1356,7 @@ body_menu(Dir, #st{selmode=body}) ->
      {?STR(menu,18,"Duplicate"),{duplicate,Dir},
       ?STR(menu,19,"Duplicate and move selected lights")},
      {?STR(menu,20,"Delete"),delete,
-      ?STR(menu,21,"Delete seleced lights")}];
+      ?STR(menu,21,"Delete selected lights")}];
 body_menu(_, _) -> [].
 
 filter_menu(Menu, St) ->

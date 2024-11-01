@@ -13,7 +13,8 @@
 
 -module(wings_gl).
 -export([init/1, window/4, attributes/0,
-         setCurrent/2, wxGLCanvas_new/3, %% new wx api variants
+         setCurrent/2, setCurrent/3,
+         wxGLCanvas_new/3, %% new wx api variants
 	 is_ext/1,is_ext/2,
 	 error_string/1]).
 
@@ -27,14 +28,14 @@
 -export([have_fbo/0, setup_fbo/2, delete_fbo/1]).
 
 %% GL wrappers
--export([project/6, unProject/6,
+-export([
 	 triangulate/2, deleteTextures/1,
 	 bindFramebuffer/2,
 	 drawElements/4
 	]).
 
 %% Debugging.
--export([check_error/2]).
+-export([check_error/2, init_extensions/0]).
 
 -define(NEED_OPENGL, 1).
 -include("wings.hrl").
@@ -45,28 +46,37 @@
 -endif.
 
 init(Parent) ->
+    check_for_msaa(),
     GL = window(Parent, undefined, true, false),
     init_extensions(),
     GL.
 
+%%% Intel GPUs have been crashing Wings3D on start. It's related to MSAA management
+%%% by the driver has been turned off on Intel Control Panel.
+%%% To avoid that we cannot initialize GLCanvas with MSAA in case it's not available.
+check_for_msaa() ->
+    MSAA = 
+        try
+            wxGLCanvas:isDisplaySupported ([?WX_GL_SAMPLE_BUFFERS,1,  ?WX_GL_SAMPLES,4, 0])
+        catch _:_Reason:_ST ->
+            false
+        end,
+    wings_pref:set_value(gl_msaa, MSAA),
+    not MSAA andalso io:format("Multisampling (MSAA) not available~n").
+
 attributes() ->
-    SB = case os:type() of
-             {unix, Os} when Os =/= darwin ->
-                 %% Sample buffers does not currently work on Wayland
-                 case os:getenv("XDG_SESSION_TYPE") of
-                     "x11" -> [?WX_GL_SAMPLE_BUFFERS,1, ?WX_GL_SAMPLES,4];
-                     "X11" -> [?WX_GL_SAMPLE_BUFFERS,1, ?WX_GL_SAMPLES,4];
-                     _ -> []
-                 end;
-             _ ->
-                 [?WX_GL_SAMPLE_BUFFERS,1, ?WX_GL_SAMPLES,4]
-         end,
+    %% init Sample buffers attributes if multisampling available
+    SB =
+        case wings_pref:get_value(gl_msaa, true) of
+            true -> [?WX_GL_SAMPLE_BUFFERS,1, ?WX_GL_SAMPLES,4, 0];
+            false -> [0]
+        end,
     {attribList,
      [?WX_GL_RGBA,
       ?WX_GL_MIN_RED,8,?WX_GL_MIN_GREEN,8,?WX_GL_MIN_BLUE,8,
       ?WX_GL_DEPTH_SIZE, 24,
-      ?WX_GL_DOUBLEBUFFER] ++
-         SB ++ [0]
+      ?WX_GL_DOUBLEBUFFER
+     ] ++ SB
     }.
 
 window(Parent, Context0, Connect, Show) ->
@@ -91,9 +101,14 @@ window(Parent, Context0, Connect, Show) ->
 	    wxFrame:show(Parent),
 	    receive #wx{event=#wxShow{}} -> ok end;
 	false ->
-            timer:sleep(200), %% Let wx realize the window on gtk
 	    ok
     end,
+    %% Let wxWidgets have time to realize the window (on GTK)
+    %% otherwise the setCurrent fails.
+    %% The show event may come before the window is actually
+    %% displayed, sigh, so always sleep for a short while before
+    %% the setCurrent call.
+    timer:sleep(200),
     wxWindow:disconnect(Parent, show),
     setCurrent(GL,Context),
     GL.
@@ -183,13 +198,32 @@ forward_key(_) -> false.
 new_gl_api() ->
     wings_u:is_exported(wxGLCanvas, setCurrent, 2).
 
-setCurrent(GL,Context) ->
+setCurrent(GL, Context) ->
+    setCurrent(GL, Context, false).
+setCurrent(GL, Context0, Recreate0) ->
     SetCurrent = wings_u:id(setCurrent),
+    CreateSurface = wings_u:id(createSurface),
+    Recreate = case os:type() of
+                   {unix, darwin} -> false;
+                   {unix, _} -> Recreate0;
+                   {win32, _} -> false
+               end,
+
     case new_gl_api() of
         false -> wxGLCanvas:SetCurrent(GL);
-        true -> wxGLCanvas:SetCurrent(GL,Context)
+        true when not Recreate ->
+            true = wxGLCanvas:SetCurrent(GL,Context0);
+        true when Recreate ->
+            try  %% EGL surface needs to recreated after reparent
+                true = wxGLCanvas:CreateSurface(GL),
+                Context = wxGLContext:new(GL, [{other, Context0}]),
+                ?SET(gl_context, Context),
+                true = wxGLCanvas:SetCurrent(GL,Context)
+            catch _:_Reason:_ST ->
+                    %% ?dbg("ERROR: ~p in ~p~n", [_Reason, _ST]),
+                    true = wxGLCanvas:SetCurrent(GL,Context0)
+            end
     end.
-
 
 wxGLCanvas_new(Parent, undefined, Ps) ->
     wxGLCanvas:new(Parent, Ps);
@@ -432,14 +466,14 @@ setup_fbo_2({color, Options}, {W,H}, Count) ->
     gl:texImage2D(?GL_TEXTURE_2D, 0, Internal, W, H, 0, Format, Type, 0),
 
     MinF = proplists:get_value(min, Options, ?GL_LINEAR),
-    gl:texParameterf(?GL_TEXTURE_2D,?GL_TEXTURE_MIN_FILTER, MinF),
+    gl:texParameteri(?GL_TEXTURE_2D,?GL_TEXTURE_MIN_FILTER, MinF),
     MagF = proplists:get_value(mag, Options, ?GL_LINEAR),
-    gl:texParameterf(?GL_TEXTURE_2D, ?GL_TEXTURE_MAG_FILTER, MagF),
+    gl:texParameteri(?GL_TEXTURE_2D, ?GL_TEXTURE_MAG_FILTER, MagF),
 
     WS = proplists:get_value(wrap_s, Options, ?GL_REPEAT),
-    gl:texParameterf(?GL_TEXTURE_2D, ?GL_TEXTURE_WRAP_S, WS),
+    gl:texParameteri(?GL_TEXTURE_2D, ?GL_TEXTURE_WRAP_S, WS),
     WT = proplists:get_value(wrap_t, Options, ?GL_REPEAT),
-    gl:texParameterf(?GL_TEXTURE_2D, ?GL_TEXTURE_WRAP_T, WT),
+    gl:texParameteri(?GL_TEXTURE_2D, ?GL_TEXTURE_WRAP_T, WT),
 
     GEN_MM = proplists:get_value(gen_mipmap, Options, ?GL_FALSE),
     gl:texParameteri(?GL_TEXTURE_2D, ?GL_GENERATE_MIPMAP, GEN_MM),
@@ -510,28 +544,9 @@ check_fbo_status(FB) ->
 bindFramebuffer(W, Fbo) ->
     gl:bindFramebuffer(W,Fbo).
 
-project(X,Y,Z, Mod, Proj, View) ->
-    {_, RX,RY,RZ} = glu:project(X,Y,Z, mat(Mod), mat(Proj), View),
-    {RX,RY,RZ}.
-
-unProject(X,Y,Z, Mod, Proj, View) ->
-    {_, RX,RY,RZ} = glu:unProject(X,Y,Z, mat(Mod), mat(Proj), View),
-    {RX,RY,RZ}.
-
-mat(Mat) when tuple_size(Mat) =:= 16 ->  Mat;
-mat(Mat) when is_tuple(Mat) -> e3d_mat:expand(Mat);
-mat(List) when is_list(List) ->  mat(list_to_tuple(List)).
-
 triangulate(Normal, Pos0) ->
-    {Tris0, BinPos} = glu:tesselate(Normal, Pos0),
-    Tris = tris(Tris0),
-    Res = {Tris, [{X,Y,Z}|| <<X:64/float-native,Y:64/float-native, Z:64/float-native>> <= BinPos]},
-    %%io:format("~p~n~p~n~p~n",[Pos0, Tris, element(2, Res)]),
-    Res.
+    wings_glu_tess:triangulate(Normal, Pos0).
 
-tris([A,B,C|Rs]) ->
-    [{A+1,B+1,C+1}|tris(Rs)];
-tris([]) -> [].
 
 deleteTextures(List) ->
     gl:deleteTextures(List).

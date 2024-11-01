@@ -68,6 +68,7 @@ MODULES= \
 	wings_geom_win \
 	wings_gl \
 	wings_glfont \
+	wings_glu_tess \
 	wings_help \
 	wings_hotkey \
 	wings_info \
@@ -87,6 +88,7 @@ MODULES= \
 	wings_obj \
 	wings_outliner \
 	wings_palette \
+	wings_palette_imports \
 	wings_pb \
 	wings_pick \
 	wings_pick_nif \
@@ -122,6 +124,7 @@ MODULES= \
 	wings_vertex \
 	wings_vertex_cmd \
 	wings_view \
+	wings_view_win \
 	wings_we \
 	wings_we_build \
 	wings_we_util \
@@ -144,8 +147,7 @@ APP_TARGET = $(EBIN)/$(APP_FILE)
 # ----------------------------------------------------
 # FLAGS
 # ----------------------------------------------------
-ERL_COMPILE_FLAGS += -Werror -I ../.. -I../_deps $(TYPE_FLAGS) \
-'-Dwings_version="$(WINGS_VSN)"' -pa $(WINGS_INTL)
+ERL_COMPILE_FLAGS += -Werror -I ../.. -I../_deps $(TYPE_FLAGS) -pa $(WINGS_INTL)
 
 # ----------------------------------------------------
 # Targets
@@ -168,7 +170,8 @@ clean:
 	rm -f core
 
 $(EBIN)/wings_u.beam: $(ESRC)/wings_u.erl
-	$(ERLC) '-Dwings_branch="$(WINGS_BRANCH)"' $(ERL_COMPILE_FLAGS) -o$(EBIN) $<
+	$(ERLC) '-Dwings_branch="$(WINGS_BRANCH)"' '-Dwings_version="$(WINGS_VSN)"' \
+	      $(ERL_COMPILE_FLAGS) -o$(EBIN) $<
 
 $(EBIN)/%.beam: $(ESRC)/%.erl
 	$(ERLC) $(ERL_COMPILE_FLAGS) -o$(EBIN) $<
@@ -181,7 +184,7 @@ $(APP_TARGET): $(APP_SRC) ../vsn.mk Makefile
 # ----------------------------------------------------
 # Dependencies
 # ----------------------------------------------------
-$(EBIN)/wings_export.beam $(EBIN)/wings_file.beam $(EBIN)/wings_help.beam $(EBIN)/wings_pref.beam $(EBIN)/wings_u.beam $(EBIN)/wpa.beam: ../vsn.mk
+$(EBIN)/wings_u.beam: ../vsn.mk
 
 $(EBIN)/wings_text.beam: ../intl_tools/wings_chars.hrl
 

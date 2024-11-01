@@ -14,7 +14,7 @@
 
 -module(wpc_bend).
 
--export([init/0,menu/2,command/2]).
+-export([init/0,menu/2,command/2,setup/2]).
 -import(lists, [foldl/3]).
 -include_lib("wings/src/wings.hrl").
 
@@ -107,6 +107,10 @@ adv_submenu_clamped(Button, NS) ->
 %%
 %%  Respond to commands
 %%
+
+%%% Called from wpc_autouv
+setup({Mode,Data}, St) ->
+    bend_cmd({Mode,Data}, St).
 
 bend_cmd({Mode, {'ASK',Ask}}, St) ->
     wings:ask(Ask, St, fun (AskResult, St0) ->
@@ -252,7 +256,7 @@ bend_setup_clamps(#bend_data{rodCenter=RC, rodNormal=RN}=BD,
 
 bend_verts(BendData, St) ->
     case BendData#bend_data.rodLength of
-        0.0 ->
+        +0.0 ->
             wpa:error_msg(?__(1,"Configuration does not result in bending"));
         _ ->
             %% FIXME
@@ -284,9 +288,9 @@ bend_verts(BendData, Vs0, We) ->
 %%   The return value is the new position. {X,Y,Z}
 %%
 
-bend_vertex(Pos, _, #bend_data{rodLength = 0.0}) ->
+bend_vertex(Pos, _, #bend_data{rodLength = +0.0}) ->
   Pos;
-bend_vertex(Pos, 0.0, #bend_data{dragMode = fixed_length}) ->
+bend_vertex(Pos, +0.0, #bend_data{dragMode = fixed_length}) ->
   Pos;
 bend_vertex(Pos, Angle, #bend_data{dragMode = DragMode,
                                    rodCenter = RC,

@@ -1,3 +1,198 @@
+--- 2.3 --------------------------------------------
+
+- Added option to rotate the environment map. [micheus]
+
+- Fixed misplaced context menu in a multiple display setup. [micheus]
+
+- Fixed Align command in AutoUV editor that was not working properly. [micheus]
+
+- Added Proportional option to the Distribution command in AutoUV editor. [micheus]
+
+- Replaced the label 'Radial' by 'Radius' in Sphere primitive dialog.
+  Thanks to e.m.hobo for the suggestion. [micheus]
+
+- Fixed a crash when closing a window with the context menu active. Thanks to markie. [dgud]
+
+- Fixed a crash when renaming screenshots. Thanks to markie. [micheus]
+
+- Fixed the Connect RMB command that was entering in slide mode after no
+  connection has been done. [micheus]
+
+- Fixed a soft crash caused by selectiong MMB for Flow Connect command [micheus]
+
+- Fixed the Collapse command that was creating wrong topolgy in
+  face mode. Thanks to ptoing. [micheus]
+
+- Fixed NormalMap rendering, thanks Markie. [dgud]
+
+- Updated the splash screen image whth the one choosen in the contest.
+  Congrats to user chosetec. [micheus]
+
+- Fixed a crash which happened during start on some Intel GPUs when MSAA was
+  disabled in a PC setup. [Micheus]
+
+- Fixed the bind DELETE key after it has been unbound. Thanks to ptoing. [micheus]
+
+- Added more import and export features to palette window. Fixed right
+  click when outside palette square. Thanks tkbd and micheus for
+  suggestions and testing. [Edward Blake]
+
+- Fixed a division by zero crash in AutoUV when very tiny islands
+  exists. Thanks tkbd [micheus]
+
+- The file type in the file dialog now is in accordance with the glTF type
+  choosen in the option dialog. Thanks to markie [micheus]
+
+- Rewrote OpenGL window handling to make it work with EGL on linux,
+  and various other linux fixes. [dgud]
+
+- Fixed a bug in transparency rendering. [dgud]
+
+- Lots of improvements in various Importers/Exporters by Edward Blake.
+   Import DirectX (.x) files.
+   Added X3D export, adding X3D and VRML import.
+   SVG additions and improvments.
+   Added WMF and EMF path import plugin.
+   Improved Adode Postscript support.
+
+- The file type in the file dialog now is in accordance with the glTF type
+  choosen in the option dialog. Thanks to markie [micheus]
+
+- Added Bend command to AutoUV toolset. [micheus]
+
+- New primitive Oblong [micheus]
+
+- Fixed a crach in autouv when rotating a char with multiple edges selected. [micheus]
+
+- When objects and materials was including invalid charactes the .dae file
+  couldn't be imported by other applications. Thanks to Wҽɳԃιҽ Bʅαƈƙƚԋσɾɳ [micheus]
+
+- For the first time, there is a now separate Wings package
+  optimized for Macs with an M1 or M2 chip (Apple Silicon). [bjorng]
+
+- New Duplicate Radial command. [micheus]
+
+--- 2.2.9 --------------------------------------------
+
+- Drag and drop file feature was not importing files with uppercase file
+  extensions. Thanks to rgcotl at Discord. [micheus]
+
+- Fixed autouv crash in create_texture dialogs. [dgud]
+
+- Fixed marquee transparency on Linux. Thanks to Klim. [micheus]
+
+- Added zoom option to wings camera mode. [dgud]
+
+- Fixed material dialog crash. [micheus]
+
+- Updated geometry graph icons. [dgud]
+
+- Fixed startup crash. [dgud]
+
+- Fixed crash when creating menu. [dgud]
+
+--- 2.2.8 --------------------------------------------
+
+- Fixed a crash caused by checking image name. Thanks to rgcotl (at Discord) [micheus]
+
+- Rewrote grid drawing. [dgud]
+
+- Fixed pale colors for materials and vertex colors. [dgud]
+
+- New splash screen image. Congrats to Hank. [micheus]
+
+- Uses Erlang/OTP-24 in pre-built versions, which should give a performance boost. [dgud]
+
+- The material properties for plugins are now accessed by choosing the
+  plugin name in a drop-down list and clicking on the "Edit..." button. [micheus]
+
+- Yafaray fixes:
+-- Fixed Yafaray issues in both Material and Option dialogs. Thanks to oort [micheus]
+-- Fixed the remaining non-latin characters handling in order to prevent
+     further crashes in Yafaray exporter. Thanks to tkbd. [Micheus]
+-- Small fixes to Yafaray plugin. Thanks to oort. [micheus]
+
+--- 2.2.7 --------------------------------------------
+
+New stuff
+
+- Added "View Settings Window" where camera and light options can
+  be edited. [dgud]
+
+- Large auto-uv work
+-- Added a new uv-unwrapping algorithm unfold for 64b versions (old is kept as slow). [dgud]
+-- Added an option to AutoUV to export the UV mesh as .eps/.svg files. [micheus]
+-- Added option to scale uniformly the UV to the max U or max V. [micheus]
+-- Added Align option to AutoUV in order to make easier to align islands to each other [micheus]
+-- Added triplanar and image mix shaders to AutoUV Shader. [micheus]
+-- Added preview window for the shaders when generating textures. [micheus]
+
+- A large re-write of the yafray plugin. Thanks David Bluecame [David Bluecame]
+
+- Added missing option for Select menu that allows to lock the current
+  selected objects. Thanks to tkbd. [micheus]
+
+- Changed Separate command in order to keep all object selected.
+  Thanks to tkbd for the suggestion [micheus]
+
+- Added a greebles plugin [dgud]
+
+- Added a dialog to STL exporter allowing users to set the scale.
+  Thanks to dawntreader, imagine and Mert HANCIOGLU(instagram) for provide
+  us information about the slicers measures. [Micheus]
+
+- Added new primitive screw thread [Micheus]
+
+- Folder system now shows in bold the folder which owns any selected objects; [micheus]
+
+- Added a warning for Revert command on the  main menu File. [micheus]
+
+- Decreased the near clipping value from 0.01 to 0.001;
+  The ground grid is also now drawn for scales as 0.1, 0.01 and 0.001; [micheus]
+
+- Added MMB option to Material menu item when Geometry window is in Face
+  selection mode. Thanks Hank for the suggestion. [micheus]
+
+- Do not attach temporary windows when moving them on top of wings. [dgud]
+
+- New splash screen image by the user olve11. [micheus]
+
+Bugs fixed
+
+- WRML plugin was exporting inverted values for ambientIntensity and
+  Transparency. Thanks to greg. [micheus]
+
+- Fixed outliner hanging on linux, fixed lights nodes not
+  expanding when redrawing. [dgud]
+
+- Fixed crash when dropping images on geom window, thanks tkbd. [dgud]
+
+- Fixed snap image window crash, thanks tkbd. [dgud]
+
+- Fixed timing related crashes in outliner. Thanks Hank. [dgud]
+
+- Run the Select->Similar command in an empty was causing Wings3D to
+  display the 'Delete Hotkey' dialog. [micheus]
+
+- Fixed the help windows visibility which were getting hidden when moving
+  the mouse outside it. Thanks Grumbler. [micheus]
+
+- Fixed the collada importer error caused by NaN values. Thanks to tkbd [micheus]
+
+- Alignment commands not valid for Body or Face mode was causing the AutoUV
+  window to crash when a repeat command was used in these modes. [micheus]
+
+- Input dialogs to name/rename elements now is a little wider. Thanks tkbd
+  for the suggestion. [Micheus]
+
+- Fixed missing export parameters for SPPM and Bidirectional. Thanks oort [DavidBluecame]
+
+- Lift command with LMB option was not working properly due the use of the
+  selection state when it first was used. Thanks Hank for report it. [micheus]
+
+- RMB menus have been rewritten again, should work better and faster on linux/windows
+  [dgud]
+
 --- 2.2.6 --------------------------------------------
 
 - Error exporting .eps/.svg files using diacritical marks. Thanks Hank [micheus]
@@ -54,8 +249,8 @@
 - Fixed importing non-square 'dds' textures with mipmaps
   which caused an eternal loop. Thanks Simon Griffiths. [dgud]
 
-- Fixed crash when trying to edit area ligth properties
-  and not selecting an area ligth. Thanks Lars Thorsen. [dgud]
+- Fixed crash when trying to edit area light properties
+  and not selecting an area light. Thanks Lars Thorsen. [dgud]
 
 - Fix ttf text plugin error handling. Thanks Hank. [dgud]
 
@@ -164,7 +359,7 @@
 
 - Upgraded to erlang/otp-21.2 (mac) which should improve performance on large models. [dgud]
 
-- General Mac improvements, menues and material viewer. Reported by tkbd [dgud]
+- General Mac improvements, menus and material viewer. Reported by tkbd [dgud]
 
 - Fixed opencl crash on old ATI cards. [dgud]
 

@@ -19,7 +19,7 @@ Comments are written after a percent sign, i.e % This is a comment
 
 The data to the vertex shader comes as:
 gl_Vertex contains the uv-coords.
-gl_MultiTexCoord1 contains the real 3d vertex postions in world space.
+gl_MultiTexCoord1 contains the real 3d vertex positions in world space.
 
 There is also an option 'requires' which contains a list of
 requirements, currently only 'normal' (and 'binormal' currently not
@@ -30,7 +30,7 @@ gl_Normal.  'binormal' are sent through 'gl_MultiTexCoord2.xyz'.
 
 Other options:  Sent as uniforms
 {auv, auv_bg}.    % sampler2D image of the previous pass
-{auv, auv_txsz}.  % vec2 width and heigth of image
+{auv, auv_txsz}.  % vec2 width and height of image
 {auv, {auv_send_texture,"UserQuestion",true}}.    % Float 1.0 (true) or 0.0 (false) 
 % Asks user if we should work on whole image or only the selected chart parts, sent as float 1.0 or 0.0.
 {auv, auv_bbpos3d}. % Vec3[2] The Min and Max coords of the rendered charts

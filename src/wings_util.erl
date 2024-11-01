@@ -21,12 +21,14 @@
 	 cap/1,upper/1,stringify/1,quote/1,
 	 add_vpos/2,update_vpos/2,
 	 gb_trees_smallest_key/1,gb_trees_largest_key/1,
+	 sets_new/0,sets_from_list/1,
 	 array_keys/1,array_smallest_key/1,array_greatest_key/1,
 	 array_is_empty/1,array_entries/1,
 	 mapsfind/3,
 	 wxequal/2, wxset_pid/2, min_wx/1,
 	 nice_float/1,nice_vector/1,nice_abs_vector/1,
-         string_to_float/1,
+	 nonzero/1,
+	 string_to_float/1,
 	 unique_name/2,
 	 is_name_masked/2,
 	 lib_dir/1,
@@ -154,6 +156,16 @@ gb_trees_largest_key(Tree) ->
     {Key,_Val} = gb_trees:largest(Tree),
     Key.
 
+
+%% Create a set with performance options set.
+%%
+sets_new() ->
+    sets:new([{version,2}]).
+
+sets_from_list(List) ->
+    sets:from_list(List, [{version,2}]).
+
+
 array_keys(Array) ->
     array:sparse_foldr(fun(I, _, A) -> [I|A] end, [], Array).
 
@@ -214,6 +226,10 @@ simplify_float_1("0."++_=F) -> F;
 simplify_float_1("0"++F) -> simplify_float_1(F);
 simplify_float_1(F) -> F.
 
+nonzero(Value) ->
+    if abs(Value) < ?EPSILON -> ?EPSILON;
+    true -> Value
+    end.
 
 string_to_float("NaN") -> 0.0;
 string_to_float(Str) ->
@@ -615,7 +631,7 @@ translation_string(outliner)         -> ?__(137,"Outliner");
 translation_string(object)           -> ?__(138,"Geometry Graph");
 translation_string(palette)          -> ?__(139,"Palette");
 translation_string(console)          -> ?__(140,"Console");
-translation_string(geom_viewer)      -> ?__(141,"New Geomerty Window");
+translation_string(geom_viewer)      -> ?__(141,"New Geometry Window");
 translation_string(uv_editor_window) -> ?__(142,"UV Editor Window");
 
 %%%% Help Menu
@@ -793,6 +809,6 @@ translation_string(materials_to_colors)  -> ?__(288,"Materials to Colors");
 %%%%   Translation strings used so far 1 - 290
 %%%%
 
-%%%% Others as yet to be added are proccessed here
+%%%% Others as yet to be added are processed here
 translation_string(Atom) when is_atom(Atom) ->
     wings_util:cap(atom_to_list(Atom)).

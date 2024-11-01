@@ -451,13 +451,15 @@ grab_focus() ->
 grab_focus(Name) ->
     case is_window(Name) of
 	true  ->
-	    %%{_, [_,Where|_]} = erlang:process_info(self(), current_stacktrace),
-	    %%io:format("Grab focus: ~p~n   ~p~n",[Name, Where]),
+	    %% {_, [_,Where|_]} = erlang:process_info(self(), current_stacktrace),
 	    case get(wm_focus_grab) of
 		undefined ->
 		    update_focus(Name),
+                    %% ?dbg("Grab focus: ~p in []~n   ~p~n",[Name,Where]),
 		    put(wm_focus_grab, [Name]);
-		Stack -> put(wm_focus_grab, [Name|Stack])
+		Stack ->
+                    %% ?dbg("Grab focus: ~p in ~p~n   ~p~n",[Name,Stack,Where]),
+                    put(wm_focus_grab, [Name|Stack])
 	    end;
 	false -> ok
     end.
@@ -466,10 +468,10 @@ release_focus() ->
     case get(wm_focus_grab) of
 	undefined -> ok;
 	[_Name] ->
-            %%io:format("Release focus ~p~n",[_Name]),
+            %% ?dbg("Release focus ~p~n",[_Name]),
             erase(wm_focus_grab);
 	[_Name|Stack] ->
-            %%io:format("Release focus ~p~n",[_Name]),
+            %% ?dbg("Release focus ~p next: ~p~n",[_Name, Stack]),
             put(wm_focus_grab, Stack)
     end.
 
@@ -505,31 +507,38 @@ win_scale() ->
     #win{scale=Scale} = get_window_data(this()),
     Scale.
 
+-spec viewport() -> {integer(), integer(), integer(), integer()}.
 viewport(Name) ->
     #win{x=X,y=Y0,w=W,h=H} = get_window_data(Name),
     {_,TopH} = wings_wm:top_size(),
     Y = TopH-(Y0+H),
     {X,Y,W,H}.
 
+-spec win_size() -> {integer(), integer()}.
 win_size() ->
     {_,_,W,H} = get(wm_viewport),
     {W,H}.
 
+-spec win_size(Name::term()) -> {integer(), integer()}.
 win_size(Name) ->
     #win{w=W,h=H} = get_window_data(Name),
     {W,H}.
 
+-spec win_rect() -> {integer(), integer(), integer(), integer()}.
 win_rect() ->
     win_rect(this()).
 
+-spec win_rect(Name::term()) -> {integer(), integer(), integer(), integer()}.
 win_rect(Name) ->
     {X0,Y0,W,H} = wxWindow:getRect(wxwindow(Name)),
     {X,Y} = wxWindow:screenToClient(?GET(top_frame),{X0,Y0}),
     {X,Y,W,H}.
 
+-spec win_ul() -> {integer(), integer()}.
 win_ul() ->
     win_ul(this()).
 
+-spec win_ul(Name::term()) -> {integer(), integer()}.
 win_ul(Name) ->
     case get_window_data(Name) of
 	#win{x=X,y=Y,obj=undefined} ->
@@ -793,6 +802,9 @@ dispatch_event(#wx{obj=Obj, event=#wxFocus{type=kill_focus, win=New}}) ->
 dispatch_event(quit) ->
     foreach(fun(Name) -> send(Name, quit) end, gb_trees:keys(get(wm_windows))),
     true;
+dispatch_event(init_opengl) ->
+    foreach(fun(Name) -> send(Name, init_opengl) end, gb_trees:keys(get(wm_windows))),
+    true;
 dispatch_event({wm,WmEvent}) ->
     wm_event(WmEvent),
     true;
@@ -977,10 +989,6 @@ clear_background() ->
 
 init_opengl(Name, Canvas) ->
     wings_gl:setCurrent(Canvas, ?GET(gl_context)),
-    gl:clear(?GL_COLOR_BUFFER_BIT bor ?GL_DEPTH_BUFFER_BIT),
-    gl:pixelStorei(?GL_UNPACK_ALIGNMENT, 1),
-    {R,G,B} = wings_pref:get_value(background_color),
-    gl:clearColor(R, G, B, 1.0),
     send(Name, init_opengl).
 
 send_event(#win{z=Z}=Win, redraw) when Z < 0 ->
@@ -1343,5 +1351,6 @@ is_valid_prop(size) ->  false;
 is_valid_prop(pos) -> false;
 is_valid_prop(internal) -> false;
 is_valid_prop(external) -> false;
+is_valid_prop(gui_win) -> false;
 is_valid_prop(_) ->  true.
 

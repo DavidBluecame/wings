@@ -28,7 +28,7 @@
 -export([batch/1, foreach/2]).
 -export([change_event_handler/2, read_events/1]).
 -export([reset_grab/0,grab/1,ungrab/2,is_grabbed/0,warp/3]).
--export([reset_video_mode_for_gl/2]).
+-export([reset_video_mode_for_gl/1]).
 
 -export([make_key_event/1, scroll_event/2]).
 
@@ -71,10 +71,10 @@ is_maximized() ->
 maximize() ->
     wxTopLevelWindow:maximize(?GET(top_frame)).
 
-reset_video_mode_for_gl(_W, _H) ->
+reset_video_mode_for_gl(Bool) ->
     %% Needed on mac for some reason
     wxWindow:setFocus(?GET(gl_canvas)),
-    wings_gl:setCurrent(?GET(gl_canvas), ?GET(gl_context)),
+    wings_gl:setCurrent(?GET(gl_canvas), ?GET(gl_context), Bool),
     ok.
 
 set_title(Title) ->
@@ -147,8 +147,9 @@ set_cursor(CursorId) ->
 
 get_mouse_state() ->
     wx:batch(fun() ->
+             {X,Y} = wx_misc:getMousePosition(),  %% Temporary to fix coordinate em multiple displays
 		     MS = wx_misc:getMouseState(),
-		     #wxMouseState{x=X, y=Y,  %% integer()
+		     #wxMouseState{%% x=X, y=Y,  %% integer()
 				   leftDown=Left,
 				   middleDown=Middle,
 				   rightDown=Right %% bool()
@@ -273,6 +274,18 @@ change_event_handler(?SDL_KEYUP, false) ->
 	Io -> put_state(Io#io{key_up=false})
     end.
 
+unlock_pid(Pid, Eq) ->
+    Pid ! {locked, self()},
+    F = fun GetUnlock () ->
+                receive {unlock, Pid, Fun} ->
+                        wings_io:do_unlock(Fun, Eq)
+                after 2000 ->
+                        ?dbg("~p: waiting for unlock from ~p~n", [self(), Pid]),
+                        GetUnlock()
+                end
+        end,
+    F().
+
 read_events(Eq0) ->
     case queue:is_empty(Eq0) of
         true ->
@@ -290,23 +303,15 @@ rec_events(Eq0, Prev, Wait) ->
                     erase(mouse_warp),
                     rec_events(Eq0, Prev, Wait);
                 _ ->
-                    rec_events(Eq0, Ev, 5)
+                    rec_events(Eq0, Ev, 0)
 	    end;
 	#wx{} = Ev ->
 	    rec_events(q_in(Ev, q_in(Prev, Eq0)), undefined, 0);
 	{timeout,Ref,{event,Event}} when is_reference(Ref) ->
 	    q_in(Event, q_in(Prev, Eq0));
 	{lock, Pid} -> %% Order ?
-	    Pid ! {locked, self()},
-	    F = fun GetUnlock () ->
-			receive {unlock, Pid, Fun} -> Fun()
-			after 2000 ->
-				io:format("~p: waiting for unlock from ~p~n", [self(), Pid]),
-				GetUnlock()
-			end
-		end,
-	    F(),
-	    rec_events(Eq0, Prev, 0);
+            Eq = unlock_pid(Pid, Eq0),
+	    rec_events(Eq, Prev, 0);
         {'_wxe_error_', Op, Error} ->
             [{_,{M,F,A}}] = ets:lookup(wx_debug_info,Op),
 	    Msg = io_lib:format("~p in ~w:~w/~w", [Error, M, F, A]),
